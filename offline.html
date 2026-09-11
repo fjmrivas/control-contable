@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Sin conexión — ContaPRO+</title>
+<meta name="theme-color" content="#0f1a3d">
+<link rel="icon" href="/icons/icon-192.png">
+</head>
+<body style="margin:0;">
+  <div style="min-height:100vh; display:flex; align-items:center; justify-content:center; font-family:'Segoe UI',Arial,sans-serif; background:#f4f5fb; padding:24px;">
+    <div style="max-width:380px; text-align:center; background:#fff; border:1px solid #e7e9f2; border-radius:16px; padding:32px 24px;">
+      <div style="font-size:32px; margin-bottom:10px;">📶</div>
+      <h2 style="color:#0f1a3d; font-size:17px; margin:0 0 8px;">Sin conexión</h2>
+      <p style="color:#6b7078; font-size:13.5px; line-height:1.6; margin:0 0 20px;">ContaPRO+ necesita internet para cargar tus datos. Revisa tu conexión e inténtalo de nuevo.</p>
+      <button onclick="location.reload()" style="background:#7c5cff; color:#fff; border:none; padding:11px 24px; border-radius:10px; font-size:13.5px; font-weight:600; cursor:pointer;">Reintentar</button>
+    </div>
+  </div>
+  <script>
+    window.addEventListener('online', () => location.reload());
+  </script>
+</body>
+</html>
