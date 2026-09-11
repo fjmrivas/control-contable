@@ -79,6 +79,8 @@
   .nav-item.active{background:rgba(124,92,255,.22); color:#fff; box-shadow:inset 3px 0 0 var(--violet-light);}
   .sidebar-footer{margin-top:auto; display:flex; flex-direction:column; gap:8px; padding-top:16px; border-top:1px solid rgba(255,255,255,.08);}
   .side-user{font-size:11.5px; color:#9aa3c4; padding:0 4px 4px 4px; word-break:break-all;}
+  .topbar-empresa{font-size:12.5px; font-weight:700; color:var(--navy); text-align:right; line-height:1.3; word-break:break-word;}
+  .topbar-empresa span{display:block; font-size:11px; font-weight:500; color:var(--muted);}
   .side-btn{
     display:flex; align-items:center; gap:8px; justify-content:center;
     background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1);
@@ -630,6 +632,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M14 2v6h6"/><path d="M9 13l1.5 1.5L14 11"/></svg>
         SIRE (RVIE/RCE)
       </button>
+      <button class="nav-item" data-tab="libros" data-staff-only>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h7M9 11h7"/></svg>
+        Libros de Compras/Ventas
+      </button>
       <button class="nav-item" data-tab="herramientas" data-staff-only>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.1-3.1a5 5 0 0 1-6.6 6.6L5.4 21.5a2 2 0 0 1-2.8-2.8L11.3 9a5 5 0 0 1 6.6-6.6l-3.1 3.1z"/></svg>
         Herramientas
@@ -659,7 +665,9 @@
           <div class="topbar-sub" id="viewSub">Resumen general de tu estudio</div>
         </div>
       </div>
-      <div class="topbar-actions" id="topbarActions"></div>
+      <div class="topbar-actions" id="topbarActions">
+        <div class="topbar-empresa" id="sideClienteEmpresa" data-cliente-only></div>
+      </div>
     </div>
 
     <div class="content">
@@ -1441,6 +1449,36 @@
         </div>
       </section>
 
+      <!-- LIBROS DE COMPRAS/VENTAS (clásico, para archivar) -->
+      <section id="view-libros" class="view">
+        <div class="panel">
+          <div class="panel-head"><h3>Libro de Compras/Ventas (clásico, para archivar)</h3></div>
+          <p class="cell-muted" style="margin:-6px 0 14px 0;">
+            Reordena los mismos datos que ya se capturan para SIRE en el formato clásico de Registro de Ventas/Compras
+            (encabezado con datos de la empresa, columnas legibles, fila de totales) — para imprimir o archivar, no es el archivo que se sube a SUNAT.
+          </p>
+          <div class="form-row">
+            <div class="form-group"><label>Cliente</label>
+              <select id="librosCliente"><option value="">— Selecciona un cliente —</option></select>
+            </div>
+            <div class="form-group"><label>Año</label><input type="number" id="librosAnio" placeholder="2026" min="2011" max="2100"></div>
+            <div class="form-group"><label>Mes</label>
+              <select id="librosMes">
+                <option value="">--</option>
+                <option value="01">01 - Enero</option><option value="02">02 - Febrero</option><option value="03">03 - Marzo</option>
+                <option value="04">04 - Abril</option><option value="05">05 - Mayo</option><option value="06">06 - Junio</option>
+                <option value="07">07 - Julio</option><option value="08">08 - Agosto</option><option value="09">09 - Septiembre</option>
+                <option value="10">10 - Octubre</option><option value="11">11 - Noviembre</option><option value="12">12 - Diciembre</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;">
+            <button class="btn btn-primary" id="btnLibrosDescargarVentas">⬇ Registro de Ventas (Excel)</button>
+            <button class="btn btn-primary" id="btnLibrosDescargarCompras">⬇ Registro de Compras (Excel)</button>
+          </div>
+        </div>
+      </section>
+
       <!-- HERRAMIENTAS -->
       <section id="view-herramientas" class="view">
 <div class="tabs">
@@ -2159,7 +2197,7 @@ function escapeHtml(s){
 /* ================= MAPEO DB <-> ESTADO ================= */
 function mapClienteFromDb(row){
   return {
-    id: row.id, nombre: row.nombre, ruc: row.ruc, regimen: row.regimen,
+    id: row.id, nombre: row.nombre, ruc: row.ruc, direccion: row.direccion, regimen: row.regimen,
     honorarioMensual: row.honorario_mensual, activo: row.activo,
     representanteLegal: row.representante_legal, telefono: row.telefono, email: row.email,
     banco: row.banco, numeroCuenta: row.numero_cuenta, cuentaDetracciones: row.cuenta_detracciones,
@@ -2301,6 +2339,17 @@ function applyRoleUI(){
   });
   const rolLabel = esAdmin ? 'Super admin' : (esCliente ? 'Cliente' : 'Usuario');
   document.getElementById('sideUserEmail').textContent = (currentUser?.email || '') + ' · ' + rolLabel;
+
+  // Confirmación visible de "qué empresa estoy viendo" para el rol cliente —
+  // siempre presente en el sidebar (no solo en una vista), junto al
+  // correo/rol que ya se mostraba ahí.
+  const empresaEl = document.getElementById('sideClienteEmpresa');
+  if(empresaEl){
+    const miEmpresa = esCliente ? state.clientes.find(c=>c.id===miClienteId()) : null;
+    empresaEl.innerHTML = miEmpresa
+      ? `${escapeHtml(miEmpresa.nombre)}<span>RUC ${escapeHtml(miEmpresa.ruc||'—')}</span>`
+      : '';
+  }
 }
 
 async function loadAllData(){
@@ -2571,6 +2620,7 @@ function setTab(tab){
     usuarios:['Usuarios','Gestiona quién ve qué en tu estudio'],
     g4ta:['Generador 4ta','TXT para PLAME desde el reporte de recibos por honorarios SUNAT'],
     sire:['SIRE (RVIE/RCE)','Archivos de reemplazo para el Registro de Ventas e Ingresos y el Registro de Compras'],
+    libros:['Libros de Compras/Ventas','Registro de Ventas y Registro de Compras clásico en Excel, para archivar/imprimir'],
     herramientas:['Herramientas','Calculadoras de asesoría: suspensión de 4ta, simulador de régimen y más']
   };
   document.getElementById('viewTitle').textContent = titles[tab][0];
@@ -4256,6 +4306,316 @@ async function eliminarCliente(id){
   }catch(err){ showToast('Error: '+err.message, true); }
 }
 
+/* ================= CARGA MASIVA DE COMPROBANTES DESDE EXCEL ================= */
+/* Para migrar historial o cargar un Excel que ya arma un cliente, sin subir uno por
+   uno con OCR. Reutiliza exactamente los mismos campos que los formularios
+   individuales (incluido todo lo de SIRE) — los comprobantes quedan sin
+   archivo_url (columna ahora opcional, ver sql/018) hasta que se adjunte editando
+   cada uno si hace falta. */
+const COLUMNAS_IMPORT_COMPRA = [
+  {titulo:'Tipo de comprobante', campo:'tipo_comprobante', tipo:'enum', valores:TIPOS_COMPROBANTE, requerido:true, default:'Factura'},
+  {titulo:'Número de comprobante', campo:'numero_comprobante', tipo:'texto', requerido:true},
+  {titulo:'RUC proveedor', campo:'ruc_proveedor', tipo:'texto'},
+  {titulo:'Razón social proveedor', campo:'razon_social_proveedor', tipo:'texto', advertencia:true},
+  {titulo:'Concepto', campo:'concepto', tipo:'texto'},
+  {titulo:'Fecha de emisión (DD/MM/AAAA)', campo:'fecha_emision', tipo:'fecha', requerido:true},
+  {titulo:'Fecha de vencimiento (DD/MM/AAAA)', campo:'fecha_vencimiento', tipo:'fecha'},
+  {titulo:'Moneda (PEN/USD)', campo:'moneda', tipo:'enum', valores:['PEN','USD'], default:'PEN'},
+  {titulo:'Monto total', campo:'monto_total', tipo:'monto', requerido:true},
+  {titulo:'IGV', campo:'monto_igv', tipo:'monto'},
+  {titulo:'Retención (monto)', campo:'monto_retencion', tipo:'monto'},
+  {titulo:'% Retención', campo:'porcentaje_retencion', tipo:'monto'},
+  {titulo:'BI Gravada', campo:'bi_gravada', tipo:'monto', advertencia:true},
+  {titulo:'Monto Exonerado', campo:'monto_exonerado', tipo:'monto', default:0},
+  {titulo:'Monto Inafecto', campo:'monto_inafecto', tipo:'monto', default:0},
+  {titulo:'ISC', campo:'isc', tipo:'monto', default:0},
+  {titulo:'ICBPER', campo:'icbper', tipo:'monto', default:0},
+  {titulo:'Tipo de Cambio', campo:'tipo_cambio', tipo:'monto'},
+  {titulo:'Clasif. crédito IGV (DG/DGNG/DNG)', campo:'clasificacion_credito_igv', tipo:'enum', valores:['DG','DGNG','DNG'], default:'DG'},
+  {titulo:'Clasif. bienes/servicios', campo:'clasificacion_bienes_servicios', tipo:'texto'},
+  {titulo:'Doc. modificado - Fecha emisión', campo:'doc_modificado_fecha_emision', tipo:'fecha'},
+  {titulo:'Doc. modificado - Tipo', campo:'doc_modificado_tipo_cp', tipo:'enum', valores:TIPOS_COMPROBANTE},
+  {titulo:'Doc. modificado - Serie', campo:'doc_modificado_serie', tipo:'texto'},
+  {titulo:'Doc. modificado - Número', campo:'doc_modificado_numero', tipo:'texto'},
+];
+
+const COLUMNAS_IMPORT_VENTA = [
+  {titulo:'Tipo de comprobante', campo:'tipo_comprobante', tipo:'enum', valores:TIPOS_COMPROBANTE, requerido:true, default:'Factura'},
+  {titulo:'Número de comprobante', campo:'numero_comprobante', tipo:'texto', requerido:true},
+  {titulo:'RUC cliente final', campo:'ruc_cliente_final', tipo:'texto'},
+  {titulo:'Razón social cliente final', campo:'razon_social_cliente_final', tipo:'texto', advertencia:true},
+  {titulo:'Concepto', campo:'concepto', tipo:'texto'},
+  {titulo:'Fecha de emisión (DD/MM/AAAA)', campo:'fecha_emision', tipo:'fecha', requerido:true},
+  {titulo:'Fecha de vencimiento (DD/MM/AAAA)', campo:'fecha_vencimiento', tipo:'fecha'},
+  {titulo:'Moneda (PEN/USD)', campo:'moneda', tipo:'enum', valores:['PEN','USD'], default:'PEN'},
+  {titulo:'Monto total', campo:'monto_total', tipo:'monto', requerido:true},
+  {titulo:'% Detracción', campo:'detraccion_pct', tipo:'monto', default:0},
+  {titulo:'Retención (monto)', campo:'monto_retencion', tipo:'monto'},
+  {titulo:'% Retención', campo:'porcentaje_retencion', tipo:'monto'},
+  {titulo:'BI Gravada', campo:'bi_gravada', tipo:'monto', advertencia:true},
+  {titulo:'Monto Exonerado', campo:'monto_exonerado', tipo:'monto', default:0},
+  {titulo:'Monto Inafecto', campo:'monto_inafecto', tipo:'monto', default:0},
+  {titulo:'ISC', campo:'isc', tipo:'monto', default:0},
+  {titulo:'ICBPER', campo:'icbper', tipo:'monto', default:0},
+  {titulo:'Tipo de Cambio', campo:'tipo_cambio', tipo:'monto'},
+  {titulo:'Clasif. de la operación (DG/DGNG/DNG)', campo:'clasificacion_operacion', tipo:'enum', valores:['DG','DGNG','DNG'], default:'DG'},
+  {titulo:'Valor de exportación', campo:'valor_exportacion', tipo:'monto', default:0},
+  {titulo:'Doc. modificado - Fecha emisión', campo:'doc_modificado_fecha_emision', tipo:'fecha'},
+  {titulo:'Doc. modificado - Tipo', campo:'doc_modificado_tipo_cp', tipo:'enum', valores:TIPOS_COMPROBANTE},
+  {titulo:'Doc. modificado - Serie', campo:'doc_modificado_serie', tipo:'texto'},
+  {titulo:'Doc. modificado - Número', campo:'doc_modificado_numero', tipo:'texto'},
+];
+
+function padImport(n){ return String(n).padStart(2,'0'); }
+
+// Acepta un objeto Date (viene de XLSX con cellDates:true) o texto en
+// DD/MM/AAAA o AAAA-MM-DD — cualquier otra cosa se marca inválida en validación.
+function parsearFechaImport(v){
+  if(v instanceof Date && !isNaN(v)){
+    return `${v.getFullYear()}-${padImport(v.getMonth()+1)}-${padImport(v.getDate())}`;
+  }
+  if(typeof v === 'string'){
+    const s = v.trim();
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(m){
+      const [,, mes, dia] = m;
+      if(Number(mes)<1 || Number(mes)>12 || Number(dia)<1 || Number(dia)>31) return null;
+      return s;
+    }
+    m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/); // DD/MM/AAAA: m[1]=día, m[2]=mes, m[3]=año
+    if(m){
+      const [, dia, mes, anio] = m;
+      if(Number(mes)<1 || Number(mes)>12 || Number(dia)<1 || Number(dia)>31) return null;
+      return `${anio}-${padImport(mes)}-${padImport(dia)}`;
+    }
+  }
+  return null;
+}
+
+function construirPlantillaImport(tipo){
+  const esCompra = tipo==='compra';
+  const columnas = esCompra ? COLUMNAS_IMPORT_COMPRA : COLUMNAS_IMPORT_VENTA;
+  const wsDatos = XLSX.utils.aoa_to_sheet([columnas.map(c=>c.titulo)]);
+  wsDatos['!cols'] = columnas.map(()=>({wch:24}));
+
+  const wsInstrucciones = XLSX.utils.aoa_to_sheet([
+    ['Instrucciones'],
+    [`Completa una fila por comprobante de ${esCompra?'compra':'venta'} en la hoja "Comprobantes".`],
+    ['Fechas en formato DD/MM/AAAA.'],
+    ['Moneda: PEN o USD (si se deja vacío, se asume PEN).'],
+    ['Clasificación DG/DGNG/DNG: si se deja vacía, se usa DG por defecto.'],
+    ['Los campos "Doc. modificado" solo aplican a Notas de crédito/débito.'],
+    ['No se sube ningún archivo con esta carga — se puede adjuntar después editando cada comprobante.'],
+  ]);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, wsDatos, 'Comprobantes');
+  XLSX.utils.book_append_sheet(wb, wsInstrucciones, 'Instrucciones');
+  XLSX.writeFile(wb, `plantilla-${esCompra?'compras':'ventas'}.xlsx`);
+}
+
+let importExcel = null; // {tipo, clienteId, filas, filasValidadas}
+
+function abrirImportacionExcel(tipo, clienteId){
+  importExcel = { tipo, clienteId, filas: [], filasValidadas: null };
+  const esCompra = tipo==='compra';
+  const body = `
+    <p class="cell-muted" style="margin-top:-4px;">
+      Carga varios comprobantes de ${esCompra?'compra':'venta'} de una sola vez desde un Excel — útil para migrar historial o cargar un archivo que ya te pasó el cliente.
+      Los comprobantes quedan sin archivo adjunto (puedes agregarlo después editando cada uno).
+    </p>
+    <div class="form-row" style="align-items:center;">
+      <button class="btn btn-outline" onclick="construirPlantillaImport('${tipo}')">📥 Descargar plantilla</button>
+      <div class="form-group" style="flex:0 0 auto; margin-bottom:0;">
+        <label for="importExcelArchivo" class="btn btn-primary" style="margin:0; cursor:pointer; display:inline-flex;">📤 Elegir archivo</label>
+        <input type="file" id="importExcelArchivo" hidden accept=".xlsx,.xls" onchange="procesarExcelImportado(this)">
+      </div>
+    </div>
+    <div id="importExcelResumen" class="cell-muted" style="margin-top:10px;"></div>
+    <div id="importExcelPreview" style="display:none; margin-top:14px;">
+      <div class="g4-table-wrap" style="max-height:360px;"><table class="g4-preview" id="importExcelTabla"></table></div>
+      <div style="margin-top:14px;"><button class="btn btn-primary" id="btnImportExcelValidar" onclick="validarImportacionExcel()">Validar</button></div>
+      <div id="importExcelValidacionMsg"></div>
+    </div>
+  `;
+  const foot = `
+    <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-primary" id="btnImportExcelConfirmar" style="display:none;" onclick="confirmarImportacionExcel()">Confirmar carga</button>
+  `;
+  openModal(`Cargar comprobantes de ${esCompra?'compra':'venta'} desde Excel`, body, foot, true);
+}
+
+async function procesarExcelImportado(inputEl){
+  const file = inputEl.files[0];
+  if(!file) return;
+  const resumen = document.getElementById('importExcelResumen');
+  resumen.textContent = 'Leyendo archivo...';
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array', cellDates:true});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const filas = XLSX.utils.sheet_to_json(ws, {header:1, raw:true});
+    const columnas = importExcel.tipo==='compra' ? COLUMNAS_IMPORT_COMPRA : COLUMNAS_IMPORT_VENTA;
+    const datos = filas.slice(1).filter(fila=> fila.some(v=> v!==undefined && v!==null && String(v).trim()!==''));
+    if(datos.length===0){
+      resumen.textContent = 'No se encontraron filas de datos en el archivo (revisa que no esté vacío, o que la primera hoja sea la de "Comprobantes").';
+      return;
+    }
+    importExcel.filas = datos.map(fila=>{
+      const row = {};
+      columnas.forEach((col,i)=> row[col.campo] = fila[i]);
+      return row;
+    });
+    importExcel.filasValidadas = null;
+    resumen.textContent = `${importExcel.filas.length} fila(s) leídas. Revisa la vista previa y dale "Validar" antes de confirmar.`;
+    renderImportExcelTabla();
+    document.getElementById('importExcelPreview').style.display = '';
+    document.getElementById('importExcelValidacionMsg').innerHTML = '';
+    document.getElementById('btnImportExcelConfirmar').style.display = 'none';
+  }catch(err){
+    resumen.textContent = 'No se pudo leer el archivo: ' + err.message;
+  }finally{
+    inputEl.value = '';
+  }
+}
+
+function renderImportExcelTabla(){
+  const columnas = importExcel.tipo==='compra' ? COLUMNAS_IMPORT_COMPRA : COLUMNAS_IMPORT_VENTA;
+  const tabla = document.getElementById('importExcelTabla');
+  tabla.innerHTML = '<thead><tr>'+columnas.map(c=>`<th>${escapeHtml(c.titulo)}</th>`).join('')+'</tr></thead><tbody>'+
+    importExcel.filas.map((fila,i)=>
+      '<tr data-fila="'+i+'">'+columnas.map(col=>{
+        let valor = fila[col.campo];
+        if(valor instanceof Date) valor = `${padImport(valor.getDate())}/${padImport(valor.getMonth()+1)}/${valor.getFullYear()}`;
+        return `<td><input type="text" class="importExcelInput" data-campo="${col.campo}" value="${escapeHtml(valor==null?'':String(valor))}" style="width:130px;"></td>`;
+      }).join('')+
+    '</tr>').join('')+
+    '</tbody>';
+}
+
+function leerFilasImportDesdeTabla(){
+  return [...document.querySelectorAll('#importExcelTabla tbody tr')].map(tr=>{
+    const row = {};
+    tr.querySelectorAll('.importExcelInput').forEach(inp=>{ row[inp.dataset.campo] = inp.value; });
+    return row;
+  });
+}
+
+// Dos niveles: errores bloqueantes (identidad mínima del comprobante — tipo, número,
+// fecha de emisión, monto total) vs. advertencias que no bloquean la carga (BI
+// Gravada, razón social, documento modificado en NC/ND) — es carga masiva, se puede
+// completar después editando cada comprobante.
+function validarFilaImportExcel(columnas, row){
+  const errs = [], warns = [];
+  const out = {};
+  columnas.forEach(col=>{
+    let raw = row[col.campo];
+    if(raw===undefined || raw===null) raw = '';
+    raw = typeof raw==='string' ? raw.trim() : raw;
+
+    if(col.tipo==='fecha'){
+      if(raw===''){
+        if(col.requerido) errs.push(`${col.titulo} es obligatorio`);
+        out[col.campo] = null;
+      } else {
+        const iso = parsearFechaImport(raw);
+        if(iso===null){ errs.push(`${col.titulo}: fecha inválida ("${raw}")`); out[col.campo] = null; }
+        else out[col.campo] = iso;
+      }
+    } else if(col.tipo==='monto'){
+      if(raw===''){
+        if(col.requerido) errs.push(`${col.titulo} es obligatorio`);
+        out[col.campo] = (col.default!=null) ? col.default : null;
+      } else {
+        const n = Number(raw);
+        if(isNaN(n)){ errs.push(`${col.titulo}: "${raw}" no es un número válido`); out[col.campo] = null; }
+        else out[col.campo] = n;
+      }
+    } else if(col.tipo==='enum'){
+      if(raw===''){
+        out[col.campo] = col.default!=null ? col.default : null;
+        if(col.requerido && col.default==null) errs.push(`${col.titulo} es obligatorio`);
+      } else if(!col.valores.includes(raw)){
+        errs.push(`${col.titulo}: "${raw}" no es válido (debe ser ${col.valores.join('/')})`);
+        out[col.campo] = raw;
+      } else {
+        out[col.campo] = raw;
+      }
+    } else {
+      if(raw==='' && col.requerido) errs.push(`${col.titulo} es obligatorio`);
+      out[col.campo] = raw || null;
+    }
+
+    if(col.advertencia && !out[col.campo]){
+      warns.push(`${col.titulo} vacío`);
+    }
+  });
+
+  if((out.tipo_comprobante==='Nota de crédito' || out.tipo_comprobante==='Nota de débito') && !out.doc_modificado_numero){
+    warns.push('Nota de crédito/débito sin documento modificado (revísalo luego)');
+  }
+  return {out, errs, warns};
+}
+
+function validarImportacionExcel(){
+  const columnas = importExcel.tipo==='compra' ? COLUMNAS_IMPORT_COMPRA : COLUMNAS_IMPORT_VENTA;
+  const filasCrudas = leerFilasImportDesdeTabla();
+  const resultados = filasCrudas.map(row=> validarFilaImportExcel(columnas, row));
+  const erroresTotales = [], avisosTotales = [];
+  resultados.forEach((r,i)=>{
+    r.errs.forEach(e=> erroresTotales.push(`Fila ${i+2}: ${e}`)); // +2: la fila 1 del Excel es el encabezado
+    r.warns.forEach(w=> avisosTotales.push(`Fila ${i+2}: ${w}`));
+  });
+
+  const msg = document.getElementById('importExcelValidacionMsg');
+  const btnConfirmar = document.getElementById('btnImportExcelConfirmar');
+  if(erroresTotales.length>0){
+    msg.innerHTML = `<div class="g4-status error"><span class="dot"></span> ${erroresTotales.length} error(es) — corrígelos antes de confirmar:</div><ul class="g4-errlist">`+erroresTotales.map(e=>`<li>${escapeHtml(e)}</li>`).join('')+'</ul>';
+    btnConfirmar.style.display = 'none';
+    importExcel.filasValidadas = null;
+    return;
+  }
+  let html = `<div class="g4-status ok"><span class="dot"></span> ${resultados.length} comprobante(s) listos para cargar.</div>`;
+  if(avisosTotales.length>0){
+    html += `<ul class="g4-errlist" style="color:var(--muted);">`+avisosTotales.map(w=>`<li>${escapeHtml(w)}</li>`).join('')+'</ul>';
+  }
+  msg.innerHTML = html;
+  importExcel.filasValidadas = resultados.map(r=>r.out);
+  btnConfirmar.style.display = '';
+}
+
+async function confirmarImportacionExcel(){
+  if(!importExcel?.filasValidadas || importExcel.filasValidadas.length===0) return;
+  const btn = document.getElementById('btnImportExcelConfirmar');
+  btn.disabled = true; btn.textContent = 'Guardando...';
+  try{
+    const tabla = importExcel.tipo==='compra' ? 'comprobantes_compra' : 'comprobantes_venta';
+    const payloads = importExcel.filasValidadas.map(out=>{
+      const payload = { ...out, cliente_id: importExcel.clienteId, archivo_url: null };
+      if(importExcel.tipo==='venta'){
+        const {detraccionMonto, netoCobrar} = calcularNetoVenta(payload.monto_total, payload.detraccion_pct, payload.monto_retencion);
+        payload.detraccion_monto = detraccionMonto;
+        payload.neto_cobrar = netoCobrar;
+      }
+      return payload;
+    });
+    const {data, error} = await sb.from(tabla).insert(payloads).select();
+    if(error) throw error;
+    if(importExcel.tipo==='compra'){
+      state.comprobantesCompra.unshift(...data.map(mapComprobanteCompraFromDb));
+    } else {
+      state.comprobantesVenta.unshift(...data.map(mapComprobanteVentaFromDb));
+    }
+    closeModal();
+    refrescarFichaClientePaneles();
+    showToast(`${data.length} comprobante(s) cargado(s).`);
+  }catch(err){
+    showToast('Error guardando: ' + err.message, true);
+  }finally{
+    btn.disabled = false; btn.textContent = 'Confirmar carga';
+  }
+}
+
 let fichaClienteId = null;
 let fichaClientePeriodo = null;
 let fichaClienteTodos = false;
@@ -4376,15 +4736,16 @@ function openFichaCliente(id){
 function fichaComprasHtml(clienteId){
   const todas = state.comprobantesCompra.filter(x=>x.clienteId===clienteId)
     .slice().sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  const btnImportar = `<div style="margin-bottom:12px;"><button class="btn btn-outline btn-sm" onclick="abrirImportacionExcel('compra','${clienteId}')">📤 Cargar Excel</button></div>`;
   if(todas.length===0){
-    return `<div class="empty-state"><div class="ico">🧾</div><b>Sin comprobantes de compra</b>Todavía no se ha subido ninguna factura de compra para este cliente.</div>`;
+    return btnImportar + `<div class="empty-state"><div class="ico">🧾</div><b>Sin comprobantes de compra</b>Todavía no se ha subido ninguna factura de compra para este cliente.</div>`;
   }
   const toolbar = periodoToolbarHtml('fichaClienteNavPeriodo', 'fichaClienteToggleTodos', fichaClientePeriodo, fichaClienteTodos, 'fichaClienteExportarExcel', 'fichaClienteExportarZip');
   const filtradas = filtrarPorPeriodo(todas, fichaClientePeriodo, fichaClienteTodos);
   if(filtradas.length===0){
-    return toolbar + `<div class="empty-state"><div class="ico">🧾</div><b>Sin comprobantes en este período</b>Prueba "Ver todos" o navega a otro mes.</div>`;
+    return btnImportar + toolbar + `<div class="empty-state"><div class="ico">🧾</div><b>Sin comprobantes en este período</b>Prueba "Ver todos" o navega a otro mes.</div>`;
   }
-  return toolbar + `<div style="overflow-x:auto;"><table>
+  return btnImportar + toolbar + `<div style="overflow-x:auto;"><table>
       <thead><tr><th>Fecha</th><th>Proveedor</th><th>Concepto</th><th class="num">Monto</th><th>Estado</th><th></th></tr></thead>
       <tbody>${filtradas.map(x=>{
         const yaCompleto = x.estado==='sustentado';
@@ -4396,7 +4757,7 @@ function fichaComprasHtml(clienteId){
           <td class="num">${montoCompraHtml(x)}</td>
           <td>${estadoComprobanteBadge('compra', x, badgeAntiguedad)}</td>
           <td class="row-actions">
-            <button class="btn-ghost btn-sm" onclick="verArchivoComprobante('${x.archivoUrl}')">Ver</button>
+            ${x.archivoUrl ? `<button class="btn-ghost btn-sm" onclick="verArchivoComprobante('${x.archivoUrl}')">Ver</button>` : `<span class="cell-muted" style="font-size:11px;">Sin archivo</span>`}
             ${!yaCompleto ? `<button class="btn btn-teal btn-sm" onclick="openPagoModal('compra','${x.id}')">${tienePago?'Registrar más':'Marcar sustentado'}</button>` : ''}
             ${tienePago ? `<button class="btn-ghost btn-sm" onclick="revertirEstadoComprobante('compra','${x.id}')">↺ Revertir</button>` : ''}
             <button class="btn-ghost btn-sm" onclick="editarCompraClick('${x.id}')">Editar</button>
@@ -4410,15 +4771,16 @@ function fichaComprasHtml(clienteId){
 function fichaVentasHtml(clienteId){
   const todas = state.comprobantesVenta.filter(x=>x.clienteId===clienteId)
     .slice().sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  const btnImportar = `<div style="margin-bottom:12px;"><button class="btn btn-outline btn-sm" onclick="abrirImportacionExcel('venta','${clienteId}')">📤 Cargar Excel</button></div>`;
   if(todas.length===0){
-    return `<div class="empty-state"><div class="ico">🧾</div><b>Sin comprobantes de venta</b>Todavía no se ha registrado ninguna venta para este cliente.</div>`;
+    return btnImportar + `<div class="empty-state"><div class="ico">🧾</div><b>Sin comprobantes de venta</b>Todavía no se ha registrado ninguna venta para este cliente.</div>`;
   }
   const toolbar = periodoToolbarHtml('fichaClienteNavPeriodo', 'fichaClienteToggleTodos', fichaClientePeriodo, fichaClienteTodos, 'fichaClienteExportarExcel', 'fichaClienteExportarZip');
   const filtradas = filtrarPorPeriodo(todas, fichaClientePeriodo, fichaClienteTodos);
   if(filtradas.length===0){
-    return toolbar + `<div class="empty-state"><div class="ico">🧾</div><b>Sin comprobantes en este período</b>Prueba "Ver todos" o navega a otro mes.</div>`;
+    return btnImportar + toolbar + `<div class="empty-state"><div class="ico">🧾</div><b>Sin comprobantes en este período</b>Prueba "Ver todos" o navega a otro mes.</div>`;
   }
-  return toolbar + `<div style="overflow-x:auto;"><table>
+  return btnImportar + toolbar + `<div style="overflow-x:auto;"><table>
       <thead><tr><th>Fecha</th><th>Cliente final</th><th>Concepto</th><th class="num">Detracción</th><th class="num">Neto a cobrar</th><th>Estado</th><th></th></tr></thead>
       <tbody>${filtradas.map(x=>{
         const yaCompleto = x.estado==='cobrado';
@@ -4431,7 +4793,7 @@ function fichaVentasHtml(clienteId){
           <td class="num">${x.netoCobrar!=null?fmtMoney(x.netoCobrar, x.moneda):'—'}</td>
           <td>${estadoComprobanteBadge('venta', x, badgeAntiguedad)}</td>
           <td class="row-actions">
-            <button class="btn-ghost btn-sm" onclick="verArchivoComprobante('${x.archivoUrl}')">Ver</button>
+            ${x.archivoUrl ? `<button class="btn-ghost btn-sm" onclick="verArchivoComprobante('${x.archivoUrl}')">Ver</button>` : `<span class="cell-muted" style="font-size:11px;">Sin archivo</span>`}
             ${!yaCompleto ? `<button class="btn btn-teal btn-sm" onclick="openPagoModal('venta','${x.id}')">${tienePago?'Registrar más':'Marcar cobrado'}</button>` : ''}
             ${tienePago ? `<button class="btn-ghost btn-sm" onclick="revertirEstadoComprobante('venta','${x.id}')">↺ Revertir</button>` : ''}
             <button class="btn-ghost btn-sm" onclick="editarVentaClick('${x.id}')">Editar</button>
@@ -6243,7 +6605,7 @@ function sireSetTab(tab){
   document.getElementById('sire_panel_rce').style.display = tab==='rce' ? '' : 'none';
 }
 function poblarSelectClienteSire(){
-  ['rvieCliente','rceCliente'].forEach(id=>{
+  ['rvieCliente','rceCliente','librosCliente'].forEach(id=>{
     const el = document.getElementById(id);
     if(!el) return;
     const cur = el.value;
@@ -6293,7 +6655,7 @@ function closeModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 function openClienteModal(id){
   const editing = !!id;
   const c = editing ? state.clientes.find(x=>x.id===id) : {
-    nombre:'',ruc:'',regimen:'RG',honorarioMensual:0,activo:true,
+    nombre:'',ruc:'',direccion:'',regimen:'RG',honorarioMensual:0,activo:true,
     representanteLegal:'',telefono:'',email:'',banco:'',numeroCuenta:'',cuentaDetracciones:'',notas:'',
     certificadoVencimiento:''
   };
@@ -6308,6 +6670,8 @@ function openClienteModal(id){
         </select>
       </div>
     </div>
+    <div class="form-group"><label>Dirección</label><input type="text" id="mDireccion" value="${escapeHtml(c.direccion)}" placeholder="Ej: Av. Javier Prado Este 123, San Isidro"></div>
+    <div class="form-hint">Se usa en el encabezado del Libro de Compras/Ventas — si queda vacía, esa línea se omite.</div>
     <div class="form-row">
       <div class="form-group"><label>Honorario mensual (S/)</label><input type="number" step="0.01" min="0" id="mHonorario" value="${c.honorarioMensual||0}"></div>
       <div class="form-group"><label>Estado</label>
@@ -6376,6 +6740,7 @@ async function guardarCliente(id){
   const payload = {
     nombre,
     ruc: document.getElementById('mRuc').value.trim(),
+    direccion: document.getElementById('mDireccion').value.trim() || null,
     regimen: document.getElementById('mRegimen').value,
     honorario_mensual: parseFloat(document.getElementById('mHonorario').value)||0,
     activo: document.getElementById('mActivo').value === 'true',
@@ -6409,7 +6774,7 @@ async function guardarCliente(id){
       if(error) throw error;
       const cliente = state.clientes.find(c=>c.id===id);
       Object.assign(cliente, {
-        nombre: payload.nombre, ruc: payload.ruc, regimen: payload.regimen,
+        nombre: payload.nombre, ruc: payload.ruc, direccion: payload.direccion, regimen: payload.regimen,
         honorarioMensual: payload.honorario_mensual, activo: payload.activo,
         buenContribuyente: payload.buen_contribuyente,
         representanteLegal: payload.representante_legal, telefono: payload.telefono, email: payload.email,
@@ -8084,6 +8449,376 @@ async function importarDatos(data){
     document.getElementById('rceValidationMsg').innerHTML = '';
     document.getElementById('rceDownloadActions').style.display = 'none';
   };
+})();
+
+/* ================= LIBROS DE COMPRAS/VENTAS (clásico, para archivar) ================= */
+/* Reordena los mismos campos que ya capturamos para SIRE (bi_gravada, exonerado,
+   inafecto, isc, icbper, clasificación DG/DGNG/DNG, doc_modificado, tipo_cambio) en el
+   formato clásico de Registro de Ventas/Compras: encabezado de empresa + 2 filas de
+   encabezado de columnas (con grupos combinados) + filas de datos + fila de TOTAL.
+   No sube nada a SUNAT — es para imprimir/archivar. Reutiliza CATALOGO01_POR_TIPO,
+   catalogo06PorDocumento, splitNumeroComprobanteSire e isoADDMMAAAA de SIRE, y la misma
+   fórmula de IGV derivado + negación en Notas de Crédito ya verificada contra archivos
+   reales de SUNAT (ver comentarios en el módulo SIRE — RVIE arriba). Sin negrita/bordes
+   a propósito: la build gratuita de XLSX.js no escribe estilos, solo estructura
+   (celdas combinadas, anchos) — confirmado y aceptado.
+   Campos que la plantilla clásica de RCE pide pero el sistema no captura en ningún
+   lado ("N° Comprobante emitido por sujeto no domiciliado", "Constancia de
+   Detracción" fecha/número/importe): quedan siempre vacíos, igual que los campos
+   fuera de alcance de SIRE (IVAP, Otros Tributos). */
+(function(){
+  const MESES_LARGO = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
+
+  const COLS_VENTAS = [
+    {titulo:'CUO'},
+    {titulo:'Fecha Emisión'},
+    {titulo:'Fecha Vencimiento'},
+    {titulo:'Tipo'},
+    {titulo:'Serie'},
+    {titulo:'Numero'},
+    {grupo:'Doc Identidad', titulo:'Tipo'},
+    {grupo:'Doc Identidad', titulo:'Número'},
+    {titulo:'Apellidos y Nombres o Razón Social'},
+    {titulo:'Valor Facturado o Exportación', sumar:true},
+    {titulo:'Base Imponible de la Operación Gravada', sumar:true},
+    {titulo:'IGV y/o IPM', sumar:true},
+    {grupo:'Exo/Inafecta', titulo:'Exonerada', sumar:true},
+    {grupo:'Exo/Inafecta', titulo:'Inafecta', sumar:true},
+    {titulo:'ISC', sumar:true},
+    {grupo:'IVAP', titulo:'Base Imponible', sumar:true},
+    {grupo:'IVAP', titulo:'IVAP', sumar:true},
+    {titulo:'ICBPER', sumar:true},
+    {titulo:'Otros Tributos y Cargos', sumar:true},
+    {titulo:'Importe Total', sumar:true},
+    {titulo:'Tipo de Cambio'},
+    {grupo:'Doc Modificado', titulo:'Fecha'},
+    {grupo:'Doc Modificado', titulo:'Tipo'},
+    {grupo:'Doc Modificado', titulo:'Serie'},
+    {grupo:'Doc Modificado', titulo:'Número'},
+  ];
+
+  const COLS_COMPRAS = [
+    {titulo:'CUO'},
+    {titulo:'Fecha Emisión'},
+    {titulo:'Fecha Vencimiento'},
+    {titulo:'Tipo'},
+    {titulo:'Serie'},
+    {titulo:'Año'},
+    {titulo:'Numero'},
+    {grupo:'Doc Identidad', titulo:'Tipo'},
+    {grupo:'Doc Identidad', titulo:'Número'},
+    {titulo:'Apellidos y Nombres o Razón Social'},
+    {grupo:'Grav. DG', titulo:'Base Imponible', sumar:true},
+    {grupo:'Grav. DG', titulo:'IGV', sumar:true},
+    {grupo:'Grav. DGNG', titulo:'Base Imponible', sumar:true},
+    {grupo:'Grav. DGNG', titulo:'IGV', sumar:true},
+    {grupo:'Grav. DNG', titulo:'Base Imponible', sumar:true},
+    {grupo:'Grav. DNG', titulo:'IGV', sumar:true},
+    {titulo:'Valor de las Adquisiciones No Gravadas', sumar:true},
+    {titulo:'ISC', sumar:true},
+    {titulo:'ICBPER', sumar:true},
+    {titulo:'Otros Tributos y Cargos', sumar:true},
+    {titulo:'Importe Total', sumar:true},
+    {titulo:'N° Comprobante emitido por sujeto no domiciliado'},
+    {grupo:'Constancia Detracción', titulo:'Fecha'},
+    {grupo:'Constancia Detracción', titulo:'Número'},
+    {grupo:'Constancia Detracción', titulo:'Importe'},
+    {titulo:'Tipo de Cambio'},
+    {grupo:'Doc Modificado', titulo:'Fecha'},
+    {grupo:'Doc Modificado', titulo:'Tipo'},
+    {grupo:'Doc Modificado', titulo:'Serie'},
+    {grupo:'Doc Modificado', titulo:'Número'},
+  ];
+
+  function pad(n, len){ return String(n).padStart(len, '0'); }
+
+  // IGV derivado — misma fórmula que buildRvieRow/buildRceRow, ya validada contra
+  // archivos reales de SUNAT. null si BI Gravada nunca se revisó (no confundir con 0).
+  function igvDerivado(item){
+    if(item.biGravada===null || item.biGravada===undefined || item.biGravada==='') return null;
+    const bi = Number(item.biGravada)||0;
+    const total = Number(item.montoTotal)||0;
+    const exo = Number(item.montoExonerado)||0;
+    const ina = Number(item.montoInafecto)||0;
+    const isc = Number(item.isc)||0;
+    const icb = Number(item.icbper)||0;
+    return Math.round((total - bi - exo - ina - isc - icb)*100)/100;
+  }
+
+  // Correlativo CUO: dos series independientes por período — la normal (VS/CS, 6
+  // dígitos) y Recibo por Honorarios (RH, 3 dígitos, sin guiones) — numeradas cada
+  // una según el orden de created_at dentro de su propia serie (el dato más cercano
+  // que tenemos al "orden de registro" original).
+  function asignarCUO(items, aamm, serieNormal){
+    const ordenados = items.slice().sort((a,b)=> (a.createdAt||'').localeCompare(b.createdAt||''));
+    let nNormal = 0, nRH = 0;
+    const porId = {};
+    ordenados.forEach(item=>{
+      if(item.tipoComprobante === 'Recibo por honorarios'){
+        nRH++;
+        porId[item.id] = `${aamm}RH${pad(nRH,3)}`;
+      } else {
+        nNormal++;
+        porId[item.id] = `${aamm}-${serieNormal}-${pad(nNormal,6)}`;
+      }
+    });
+    return porId;
+  }
+
+  // Libro contable oficial: siempre en soles — un comprobante en USD se convierte
+  // con su propio tipo de cambio antes de escribir cualquier monto (el TC se
+  // muestra aparte solo como referencia). SIRE (RVIE/RCE) es distinto a propósito:
+  // ahí SÍ va en moneda original, confirmado contra archivos reales de SUNAT.
+  function convertirMontosASoles(item){
+    if(item.moneda !== 'USD') return item;
+    const tc = Number(item.tipoCambio) || 0;
+    const mul = (n) => (n===null || n===undefined || n==='') ? n : Math.round(Number(n)*tc*100)/100;
+    return {
+      ...item,
+      montoTotal: mul(item.montoTotal),
+      biGravada: mul(item.biGravada),
+      montoExonerado: mul(item.montoExonerado),
+      montoInafecto: mul(item.montoInafecto),
+      isc: mul(item.isc),
+      icbper: mul(item.icbper),
+      valorExportacion: mul(item.valorExportacion),
+    };
+  }
+
+  function construirFilaVenta(v, cuo){
+    v = convertirMontosASoles(v);
+    const {serie, numero} = splitNumeroComprobanteSire(v.numeroComprobante);
+    const signo = (v.tipoComprobante==='Nota de crédito') ? -1 : 1;
+    const igv = igvDerivado(v);
+    const neg = (n) => Math.round(Number(n||0)*signo*100)/100;
+    return [
+      cuo,
+      isoADDMMAAAA(v.fechaEmision),
+      isoADDMMAAAA(v.fechaVencimiento),
+      CATALOGO01_POR_TIPO[v.tipoComprobante] || '00',
+      serie,
+      numero,
+      catalogo06PorDocumento(v.rucClienteFinal),
+      soloDigitos(v.rucClienteFinal),
+      v.razonSocialClienteFinal || '',
+      neg(v.valorExportacion || 0),
+      neg(v.biGravada || 0),
+      neg(igv || 0),
+      neg(v.montoExonerado || 0),
+      neg(v.montoInafecto || 0),
+      neg(v.isc || 0),
+      0, 0, // IVAP BI, IVAP — fuera de alcance
+      neg(v.icbper || 0),
+      0, // Otros Tributos
+      neg(v.montoTotal || 0),
+      (v.moneda==='USD') ? (v.tipoCambio||'') : '',
+      isoADDMMAAAA(v.docModificadoFechaEmision),
+      v.docModificadoTipoCp ? (CATALOGO01_POR_TIPO[v.docModificadoTipoCp]||'') : '',
+      v.docModificadoSerie || '',
+      v.docModificadoNumero || ''
+    ];
+  }
+
+  function construirFilaCompra(c, cuo){
+    c = convertirMontosASoles(c);
+    const {serie, numero} = splitNumeroComprobanteSire(c.numeroComprobante);
+    const signo = (c.tipoComprobante==='Nota de crédito') ? -1 : 1;
+    const igv = igvDerivado(c);
+    const neg = (n) => Math.round(Number(n||0)*signo*100)/100;
+    const clasif = c.clasificacionCreditoIgv || 'DG';
+    const biDG = clasif==='DG' ? (c.biGravada||0) : 0;
+    const igvDG = clasif==='DG' ? (igv||0) : 0;
+    const biDGNG = clasif==='DGNG' ? (c.biGravada||0) : 0;
+    const igvDGNG = clasif==='DGNG' ? (igv||0) : 0;
+    const biDNG = clasif==='DNG' ? (c.biGravada||0) : 0;
+    const igvDNG = clasif==='DNG' ? (igv||0) : 0;
+    const valorAdqNG = (Number(c.montoExonerado)||0) + (Number(c.montoInafecto)||0);
+    return [
+      cuo,
+      isoADDMMAAAA(c.fechaEmision),
+      isoADDMMAAAA(c.fechaVencimiento),
+      CATALOGO01_POR_TIPO[c.tipoComprobante] || '00',
+      serie,
+      (c.fechaEmision||'').slice(0,4),
+      numero,
+      catalogo06PorDocumento(c.rucProveedor),
+      soloDigitos(c.rucProveedor),
+      c.razonSocialProveedor || '',
+      neg(biDG), neg(igvDG),
+      neg(biDGNG), neg(igvDGNG),
+      neg(biDNG), neg(igvDNG),
+      neg(valorAdqNG),
+      neg(c.isc || 0),
+      neg(c.icbper || 0),
+      0, // Otros Tributos
+      neg(c.montoTotal || 0),
+      '', // N° comprobante sujeto no domiciliado — no se captura
+      '', '', '', // Constancia Detracción fecha/número/importe — no se captura
+      (c.moneda==='USD') ? (c.tipoCambio||'') : '',
+      isoADDMMAAAA(c.docModificadoFechaEmision),
+      c.docModificadoTipoCp ? (CATALOGO01_POR_TIPO[c.docModificadoTipoCp]||'') : '',
+      c.docModificadoSerie || '',
+      c.docModificadoNumero || ''
+    ];
+  }
+
+  // Arma la hoja completa: 3-4 filas de encabezado de empresa (una por línea —
+  // razón social, RUC, dirección si existe, título del registro — cada una
+  // combinada a lo ancho, en vez de una sola celda con "\n" internos: la build
+  // gratuita de XLSX.js no puede activar "Ajustar texto", así que un "\n" dentro
+  // de una celda no se ve como líneas separadas en Excel), luego 2 filas de
+  // encabezado de columnas (con merges horizontales para grupos, verticales para
+  // columnas sueltas), filas de datos y fila de TOTAL.
+  function construirHojaLibro({cliente, tipoLabel, mesNombre, anio, columnas, filasDatos}){
+    const numCols = columnas.length;
+
+    const lineasEncabezado = [cliente.nombre, `R.U.C.:${cliente.ruc||''}`];
+    if(cliente.direccion) lineasEncabezado.push(cliente.direccion);
+    lineasEncabezado.push(`REGISTRO DE ${tipoLabel} DEL MES DE ${mesNombre} ${anio}`);
+    const offset = lineasEncabezado.length; // fila (0-index) donde arranca el encabezado de columnas
+
+    const fila1 = [], fila2 = [];
+    const mergesEncabezado = [];
+    let col = 0, i = 0;
+    while(i < columnas.length){
+      const c = columnas[i];
+      if(c.grupo){
+        let j = i;
+        while(j < columnas.length && columnas[j].grupo === c.grupo) j++;
+        const span = j - i;
+        fila1[col] = c.grupo;
+        for(let k=1;k<span;k++) fila1[col+k] = '';
+        mergesEncabezado.push({s:{r:offset,c:col}, e:{r:offset,c:col+span-1}});
+        for(let k=0;k<span;k++) fila2[col+k] = columnas[i+k].titulo;
+        col += span; i = j;
+      } else {
+        fila1[col] = c.titulo;
+        fila2[col] = '';
+        mergesEncabezado.push({s:{r:offset,c:col}, e:{r:offset+1,c:col}});
+        col++; i++;
+      }
+    }
+
+    const filaTotal = new Array(numCols).fill('');
+    filaTotal[0] = 'TOTAL';
+    columnas.forEach((c, idx)=>{
+      if(c.sumar){
+        filaTotal[idx] = Math.round(filasDatos.reduce((s,f)=> s + (Number(f[idx])||0), 0)*100)/100;
+      }
+    });
+
+    const filasEncabezadoEmpresa = lineasEncabezado.map(linea=>{
+      const fila = new Array(numCols).fill('');
+      fila[0] = linea;
+      return fila;
+    });
+
+    const aoa = [
+      ...filasEncabezadoEmpresa,
+      fila1,
+      fila2,
+      ...filasDatos,
+      filaTotal
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const mergesEmpresa = lineasEncabezado.map((_, idx)=> ({s:{r:idx,c:0}, e:{r:idx,c:numCols-1}}));
+    ws['!merges'] = [
+      ...mergesEmpresa,
+      ...mergesEncabezado
+    ];
+    ws['!cols'] = columnas.map(()=>({wch:16}));
+    return ws;
+  }
+
+  function periodoSeleccionado(){
+    const clienteId = document.getElementById('librosCliente').value;
+    const anio = document.getElementById('librosAnio').value.trim();
+    const mes = document.getElementById('librosMes').value;
+    return { clienteId, anio, mes };
+  }
+
+  function validarPeriodo({clienteId, anio, mes}){
+    if(!clienteId){ showToast('Selecciona un cliente', true); return false; }
+    if(!anio || !mes){ showToast('Ingresa año y mes del período', true); return false; }
+    return true;
+  }
+
+  // No hay paso de vista previa/edición en este módulo (a diferencia de SIRE) — así
+  // que si BI Gravada nunca se revisó, se bloquea la generación en vez de exportar un
+  // 0 silencioso en un documento para archivar.
+  function validarBiGravadaRevisada(items){
+    const sinRevisar = items.filter(it=> it.biGravada===null || it.biGravada===undefined || it.biGravada==='');
+    if(sinRevisar.length===0) return true;
+    const ejemplos = sinRevisar.slice(0,5).map(it=>it.numeroComprobante||'sin número').join(', ');
+    const masTexto = sinRevisar.length>5 ? ` y ${sinRevisar.length-5} más` : '';
+    showToast(`${sinRevisar.length} comprobante(s) sin BI Gravada revisada (${ejemplos}${masTexto}) — complétala editando el comprobante antes de generar el libro.`, true);
+    return false;
+  }
+
+  // El libro contable debe ir en soles — sin TC no hay forma de convertir un
+  // comprobante en USD, así que se bloquea la generación en vez de exportarlo sin
+  // convertir (mismo patrón que validarBiGravadaRevisada).
+  function validarTipoCambioUsd(items){
+    const sinTc = items.filter(it=> it.moneda==='USD' && !(Number(it.tipoCambio)>0));
+    if(sinTc.length===0) return true;
+    const ejemplos = sinTc.slice(0,5).map(it=>it.numeroComprobante||'sin número').join(', ');
+    const masTexto = sinTc.length>5 ? ` y ${sinTc.length-5} más` : '';
+    showToast(`${sinTc.length} comprobante(s) en USD sin tipo de cambio registrado (${ejemplos}${masTexto}) — el libro va en soles: completa el tipo de cambio editando el comprobante antes de generar el libro.`, true);
+    return false;
+  }
+
+  document.getElementById('btnLibrosDescargarVentas').addEventListener('click', ()=>{
+    const sel = periodoSeleccionado();
+    if(!validarPeriodo(sel)) return;
+    const cliente = state.clientes.find(c=>c.id===sel.clienteId);
+    if(!cliente?.ruc){ showToast('El cliente no tiene RUC registrado', true); return; }
+    const prefijo = `${sel.anio}-${sel.mes}`;
+    const ventas = state.comprobantesVenta.filter(v=>v.clienteId===sel.clienteId && (v.fechaEmision||'').startsWith(prefijo));
+    if(ventas.length===0){ showToast(`No hay comprobantes de venta en ${prefijo} para ${cliente.nombre}.`, true); return; }
+    if(!validarBiGravadaRevisada(ventas)) return;
+    if(!validarTipoCambioUsd(ventas)) return;
+
+    const aamm = sel.anio.slice(2) + sel.mes;
+    const cuoPorId = asignarCUO(ventas, aamm, 'VS');
+    const filasDatos = ventas
+      .slice().sort((a,b)=> (a.fechaEmision||'').localeCompare(b.fechaEmision||''))
+      .map(v=> construirFilaVenta(v, cuoPorId[v.id]));
+
+    const ws = construirHojaLibro({
+      cliente, tipoLabel:'VENTAS', mesNombre: MESES_LARGO[Number(sel.mes)-1], anio: sel.anio,
+      columnas: COLS_VENTAS, filasDatos
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Registro de Ventas');
+    XLSX.writeFile(wb, `registro-ventas_${sanitizeNombreArchivo(cliente.nombre)}_${prefijo}.xlsx`);
+  });
+
+  document.getElementById('btnLibrosDescargarCompras').addEventListener('click', ()=>{
+    const sel = periodoSeleccionado();
+    if(!validarPeriodo(sel)) return;
+    const cliente = state.clientes.find(c=>c.id===sel.clienteId);
+    if(!cliente?.ruc){ showToast('El cliente no tiene RUC registrado', true); return; }
+    const prefijo = `${sel.anio}-${sel.mes}`;
+    const compras = state.comprobantesCompra.filter(c=>c.clienteId===sel.clienteId && (c.fechaEmision||'').startsWith(prefijo));
+    if(compras.length===0){ showToast(`No hay comprobantes de compra en ${prefijo} para ${cliente.nombre}.`, true); return; }
+    if(!validarBiGravadaRevisada(compras)) return;
+    if(!validarTipoCambioUsd(compras)) return;
+
+    const aamm = sel.anio.slice(2) + sel.mes;
+    const cuoPorId = asignarCUO(compras, aamm, 'CS');
+    const filasDatos = compras
+      .slice().sort((a,b)=> (a.fechaEmision||'').localeCompare(b.fechaEmision||''))
+      .map(c=> construirFilaCompra(c, cuoPorId[c.id]));
+
+    const ws = construirHojaLibro({
+      cliente, tipoLabel:'COMPRAS', mesNombre: MESES_LARGO[Number(sel.mes)-1], anio: sel.anio,
+      columnas: COLS_COMPRAS, filasDatos
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Registro de Compras');
+    XLSX.writeFile(wb, `registro-compras_${sanitizeNombreArchivo(cliente.nombre)}_${prefijo}.xlsx`);
+  });
 })();
 
 /* ================= LEER PDF DE SUNAT (autocompletar impuestos) ================= */
