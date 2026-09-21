@@ -32,7 +32,8 @@
 // URL y gaste la cuota de las APIs. No hace falta un secreto
 // adicional embebido en el HTML público.
 //
-// body esperado: { mimeType: string, data: string (base64), tipo?: 'compra'|'venta' }
+// body esperado: { mimeType: string, data: string (base64), tipo?: 'compra'|'venta',
+//                  objeto_social?: string (solo compras — activa la alerta de giro) }
 // respuesta: { ok: true, data: {...} } | { ok: false, error }
 //
 // Rutas:
@@ -134,6 +135,53 @@ const HERRAMIENTA_FACTURA = {
     required: ['ruc', 'razon_social', 'ruc_receptor', 'razon_social_receptor', 'fecha_emision', 'tipo_comprobante', 'numero_comprobante', 'concepto', 'monto_total', 'monto_igv', 'monto_retencion', 'porcentaje_retencion', 'moneda', 'fecha_vencimiento', 'bi_gravada', 'monto_exonerado', 'monto_inafecto', 'isc', 'icbper', 'tipo_cambio', 'doc_modificado_fecha_emision', 'doc_modificado_tipo_cp', 'doc_modificado_serie', 'doc_modificado_numero']
   }
 };
+
+// ------------------------------------------------------------------
+// Alerta de giro de negocio (solo COMPRAS, y solo si el cliente tiene
+// objeto_social cargado): se evalúa en la MISMA llamada del OCR — un bloque de
+// prompt extra + 2 campos extra en el schema, sin llamada adicional. Aviso no
+// bloqueante para detectar gastos no deducibles antes de una fiscalización.
+// El bloque está calibrado contra falsos positivos a propósito: un aviso que
+// salta seguido termina ignorándose por costumbre, así que por defecto NO marca.
+// ------------------------------------------------------------------
+const MAX_OBJETO_SOCIAL = 1000;
+
+function bloqueGiroNegocio(objetoSocial) {
+  return `
+
+EVALUACIÓN DE GIRO DE NEGOCIO (campos alerta_giro_negocio y alerta_giro_negocio_motivo):
+El comprobante es una COMPRA (gasto) de una empresa cuyo giro / objeto social declarado es:
+"""
+${objetoSocial}
+"""
+Evalúa si este gasto parece NO estar vinculado a esa actividad — sería un gasto probablemente no deducible ante una fiscalización de SUNAT. Sé conservador: un aviso que salta seguido termina ignorándose, así que por defecto NO marques.
+- Marca alerta_giro_negocio=true SOLO si el gasto es CLARAMENTE ajeno al giro Y no se te ocurre una justificación empresarial plausible.
+- NUNCA marques (false) los gastos generales que casi toda empresa tiene, sea cual sea su giro: servicios básicos (luz, agua, gas), internet y telefonía, alquiler de oficina o local, útiles y equipos de oficina, servicios contables, legales o de consultoría, software y suscripciones, seguros, comisiones y servicios bancarios, mantenimiento y limpieza, publicidad y marketing, capacitación, transporte, movilidad y combustible, tributos y tasas.
+- SÍ marca (true) el consumo claramente personal o doméstico (abarrotes y menaje del hogar, electrodomésticos de cocina, ropa personal, farmacia de uso personal, entretenimiento, colegios, viajes turísticos) y los insumos, maquinaria o bienes de capital de un rubro totalmente distinto al declarado.
+- Evalúa contra el documento completo (quién lo emite y las líneas de detalle), no solo contra el campo "concepto", que es un resumen de una frase.
+- Si no se puede evaluar (el detalle es genérico como "varios" o "consumo", o es ilegible), usa false — no adivines.
+- Si marcas true, alerta_giro_negocio_motivo es UNA sola frase en español, neutral y sin acusar, que explique por qué parece ajeno citando el giro declarado. Si marcas false, alerta_giro_negocio_motivo es "".
+Ejemplos (giro: "Representación artística y producción de espectáculos"):
+- Recibo de luz del local → false (gasto general).
+- Alquiler de sonido e iluminación para un evento → false (vinculado al giro).
+- Compra de una cocina a gas y una refrigeradora en una tienda de electrodomésticos → true, motivo: "Parece un artículo de uso doméstico; el giro declarado es representación artística y producción de espectáculos."
+- Boleta de supermercado con detalle genérico → false (no se puede evaluar).`;
+}
+
+function herramientaConGiro(herramienta) {
+  return {
+    ...herramienta,
+    input_schema: {
+      ...herramienta.input_schema,
+      properties: {
+        ...herramienta.input_schema.properties,
+        alerta_giro_negocio: { type: 'boolean' },
+        alerta_giro_negocio_motivo: { type: 'string' }
+      },
+      required: [...herramienta.input_schema.required, 'alerta_giro_negocio', 'alerta_giro_negocio_motivo']
+    }
+  };
+}
 
 // ------------------------------------------------------------------
 // Conciliación bancaria: extrae los movimientos de un estado de cuenta
@@ -385,14 +433,22 @@ export default {
       return jsonResponse({ ok: false, error: 'JSON inválido' }, 400);
     }
 
-    const { mimeType, data, tipo } = body || {};
+    const { mimeType, data, tipo, objeto_social } = body || {};
     if (!mimeType || !data) {
       return jsonResponse({ ok: false, error: 'Faltan mimeType o data (base64) del archivo' }, 400);
     }
 
     const esEstadoCuenta = new URL(request.url).pathname === '/estado-cuenta';
-    const prompt = esEstadoCuenta ? PROMPT_ESTADO_CUENTA : PROMPT_FACTURA;
-    const herramienta = esEstadoCuenta ? HERRAMIENTA_ESTADO_CUENTA : HERRAMIENTA_FACTURA;
+    let prompt = esEstadoCuenta ? PROMPT_ESTADO_CUENTA : PROMPT_FACTURA;
+    let herramienta = esEstadoCuenta ? HERRAMIENTA_ESTADO_CUENTA : HERRAMIENTA_FACTURA;
+
+    // Alerta de giro: solo compras con objeto_social no vacío — cualquier otro
+    // caso (ventas, estado de cuenta, cliente sin giro cargado) queda idéntico.
+    const objetoSocial = typeof objeto_social === 'string' ? objeto_social.trim().slice(0, MAX_OBJETO_SOCIAL) : '';
+    if (!esEstadoCuenta && tipo === 'compra' && objetoSocial) {
+      prompt += bloqueGiroNegocio(objetoSocial);
+      herramienta = herramientaConGiro(herramienta);
+    }
 
     // Solo la ruta de factura distingue proveedor por tipo de operación —
     // compra usa Claude, venta usa Gemini, sin respaldo entre uno y otro

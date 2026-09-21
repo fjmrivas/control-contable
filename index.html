@@ -2197,7 +2197,7 @@ function escapeHtml(s){
 /* ================= MAPEO DB <-> ESTADO ================= */
 function mapClienteFromDb(row){
   return {
-    id: row.id, nombre: row.nombre, ruc: row.ruc, direccion: row.direccion, regimen: row.regimen,
+    id: row.id, nombre: row.nombre, ruc: row.ruc, direccion: row.direccion, objetoSocial: row.objeto_social, regimen: row.regimen,
     honorarioMensual: row.honorario_mensual, activo: row.activo,
     representanteLegal: row.representante_legal, telefono: row.telefono, email: row.email,
     banco: row.banco, numeroCuenta: row.numero_cuenta, cuentaDetracciones: row.cuenta_detracciones,
@@ -2264,7 +2264,8 @@ function mapComprobanteCompraFromDb(row){
     isc: row.isc, icbper: row.icbper, tipoCambio: row.tipo_cambio,
     docModificadoFechaEmision: row.doc_modificado_fecha_emision, docModificadoTipoCp: row.doc_modificado_tipo_cp,
     docModificadoSerie: row.doc_modificado_serie, docModificadoNumero: row.doc_modificado_numero,
-    clasificacionCreditoIgv: row.clasificacion_credito_igv || 'DG', clasificacionBienesServicios: row.clasificacion_bienes_servicios
+    clasificacionCreditoIgv: row.clasificacion_credito_igv || 'DG', clasificacionBienesServicios: row.clasificacion_bienes_servicios,
+    alertaGiroNegocio: !!row.alerta_giro_negocio, alertaGiroNegocioMotivo: row.alerta_giro_negocio_motivo
   };
 }
 function mapComprobanteVentaFromDb(row){
@@ -2833,7 +2834,10 @@ function fileToBase64(file){
 // respaldo entre uno y otro, si Gemini falla la lectura simplemente falla)
 // — no cambia qué se extrae, el Worker sigue extrayendo emisor/receptor
 // tal cual aparecen; cada formulario decide dónde van.
-async function leerComprobanteConIA(file, tipo){
+// `objetoSocial` (opcional, solo compras): activa la evaluación de giro de negocio
+// en la misma llamada — el Worker devuelve alerta_giro_negocio(_motivo) además de
+// los campos normales.
+async function leerComprobanteConIA(file, tipo, objetoSocial){
   const {data:{session}} = await sb.auth.getSession();
   if(!session) throw new Error('Sesión no válida');
   const base64 = await fileToBase64(file);
@@ -2843,7 +2847,7 @@ async function leerComprobanteConIA(file, tipo){
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${session.access_token}`
     },
-    body: JSON.stringify({ mimeType: file.type, data: base64, tipo })
+    body: JSON.stringify({ mimeType: file.type, data: base64, tipo, objeto_social: objetoSocial || undefined })
   });
   const json = await resp.json();
   if(!resp.ok || !json.ok) throw new Error(json.error || 'No se pudo leer el comprobante');
@@ -3031,6 +3035,7 @@ function openComprobanteCompraModal(compraExistente, clienteIdParaCrear){
   // usuario canceló) — solo fichaConciliacionCrearComprobante lo vuelve a
   // fijar, y lo hace DESPUÉS de llamar a esta función.
   conciliacionVinculoPendiente = null;
+  compraAlertaGiro = null;
   const c = compraExistente || null;
   const esEdicion = !!c;
   const body = `
@@ -3054,6 +3059,14 @@ function openComprobanteCompraModal(compraExistente, clienteIdParaCrear){
             <span>Confirmo que este comprobante corresponde a esta empresa (ej. grupo empresarial)</span>
           </label>
         </div>
+      </div>
+    </div>
+    <div class="alert-banner warning" id="mCompraAvisoGiro" style="${c?.alertaGiroNegocio ? '' : 'display:none; '}margin-top:2px; margin-bottom:14px;">
+      <span class="ico">⚠️</span>
+      <div>
+        Posible gasto no vinculado al giro del negocio
+        <div class="sub" id="mCompraAvisoGiroMotivo">${escapeHtml(c?.alertaGiroNegocioMotivo || 'Este gasto parece no estar vinculado al giro del negocio.')}</div>
+        <div class="sub">Es solo un aviso: puedes guardar igual. Confirma que el gasto tenga sustento empresarial para evitar observaciones de SUNAT.</div>
       </div>
     </div>
     <div class="form-row">
@@ -3222,6 +3235,22 @@ function isoADDMMAAAA(iso){
   return `${m[3]}/${m[2]}/${m[1]}`;
 }
 
+// Resultado de la evaluación de giro de la ÚLTIMA lectura con IA en este modal:
+// null = no hubo lectura con IA (al guardar no se tocan los campos de alerta — al
+// editar se conserva la alerta guardada), {alerta, motivo} = reemplaza lo guardado.
+let compraAlertaGiro = null;
+
+function mostrarAvisoGiroCompra(motivo){
+  const aviso = document.getElementById('mCompraAvisoGiro');
+  const txt = document.getElementById('mCompraAvisoGiroMotivo');
+  if(txt) txt.textContent = motivo || 'Este gasto parece no estar vinculado al giro del negocio.';
+  if(aviso) aviso.style.display = '';
+}
+function ocultarAvisoGiroCompra(){
+  const aviso = document.getElementById('mCompraAvisoGiro');
+  if(aviso) aviso.style.display = 'none';
+}
+
 function mostrarAvisoRucCompra(){
   const aviso = document.getElementById('mCompraAvisoRuc');
   const chk = document.getElementById('mCompraConfirmarRuc');
@@ -3248,12 +3277,26 @@ async function autocompletarCompraConIA(idParaEditar){
   if(!file) return;
   if(!document.getElementById('mCompraLeerIA')?.checked){
     if(estadoEl) estadoEl.textContent = 'Archivo adjuntado sin leer con IA — completa los campos a mano.';
+    // Sin lectura no hay evaluación: se descarta el resultado de un archivo anterior
+    // (al crear) o se vuelve a lo guardado (al editar).
+    compraAlertaGiro = null;
+    const guardada = idParaEditar ? state.comprobantesCompra.find(x=>x.id===idParaEditar) : null;
+    if(guardada?.alertaGiroNegocio) mostrarAvisoGiroCompra(guardada.alertaGiroNegocioMotivo);
+    else ocultarAvisoGiroCompra();
     return;
   }
   if(estadoEl) estadoEl.textContent = 'Leyendo con IA...';
   ocultarAvisoRucCompra();
+  ocultarAvisoGiroCompra();
+  compraAlertaGiro = null;
+  // Mismo criterio de cliente que guardarComprobanteCompra: al editar, el dueño
+  // del comprobante; al crear, el override del staff o la empresa propia del cliente.
+  const clienteId = idParaEditar
+    ? state.comprobantesCompra.find(x=>x.id===idParaEditar)?.clienteId
+    : (document.getElementById('mCompraClienteIdOverride')?.value || miClienteId());
+  const cliente = state.clientes.find(x=>x.id===clienteId);
   try{
-    const datos = await leerComprobanteConIA(file, 'compra');
+    const datos = await leerComprobanteConIA(file, 'compra', cliente?.objetoSocial);
     if(datos.ruc) document.getElementById('mCompraRuc').value = datos.ruc;
     if(datos.razon_social) document.getElementById('mCompraRazonSocial').value = datos.razon_social;
     if(datos.fecha_emision) document.getElementById('mCompraFecha').value = datos.fecha_emision;
@@ -3283,14 +3326,18 @@ async function autocompletarCompraConIA(idParaEditar){
     // no bloqueamos silenciosamente: exigimos una confirmación explícita.
     // Si la IA no pudo leer el RUC receptor, o el cliente no tiene RUC
     // guardado, simplemente no se valida — no es un bloqueo por defecto.
-    const clienteId = idParaEditar
-      ? state.comprobantesCompra.find(x=>x.id===idParaEditar)?.clienteId
-      : miClienteId();
-    const cliente = state.clientes.find(x=>x.id===clienteId);
     if(datos.ruc_receptor && cliente?.ruc && TIPOS_CON_RUC_RECEPTOR.includes(datos.tipo_comprobante)
        && soloDigitos(datos.ruc_receptor) !== soloDigitos(cliente.ruc)){
       mostrarAvisoRucCompra();
     }
+
+    // Alerta de giro (no bloqueante). Solo se evalúa si el cliente tiene objeto
+    // social cargado — sin él el Worker no devuelve el campo. Una lectura con IA
+    // exitosa siempre reemplaza la alerta guardada (también para quitarla).
+    const alertaGiro = !!cliente?.objetoSocial && datos.alerta_giro_negocio === true;
+    const motivoGiro = alertaGiro ? (datos.alerta_giro_negocio_motivo || '').trim() : '';
+    compraAlertaGiro = {alerta: alertaGiro, motivo: motivoGiro};
+    if(alertaGiro) mostrarAvisoGiroCompra(motivoGiro);
 
     if(estadoEl) estadoEl.textContent = '✓ Datos leídos automáticamente — revísalos antes de subir.';
   }catch(err){
@@ -3362,6 +3409,10 @@ async function guardarComprobanteCompra(idParaEditar){
     };
     if(!idParaEditar) payload.cliente_id = clienteId;
     if(archivoUrl) payload.archivo_url = archivoUrl;
+    if(compraAlertaGiro){
+      payload.alerta_giro_negocio = compraAlertaGiro.alerta;
+      payload.alerta_giro_negocio_motivo = compraAlertaGiro.alerta ? (compraAlertaGiro.motivo || null) : null;
+    }
 
     let data, error;
     if(idParaEditar){
@@ -4752,7 +4803,7 @@ function fichaComprasHtml(clienteId){
         const tienePago = x.estado!=='pendiente_sustento';
         return `<tr>
           <td class="cell-muted">${x.fechaEmision?fmtFecha(x.fechaEmision):'—'}</td>
-          <td class="cell-strong">${escapeHtml(x.razonSocialProveedor)||'—'}<div class="cell-muted">${escapeHtml(x.rucProveedor)||''}</div></td>
+          <td class="cell-strong">${escapeHtml(x.razonSocialProveedor)||'—'}<div class="cell-muted">${escapeHtml(x.rucProveedor)||''}</div>${badgeAlertaGiroHtml(x)}</td>
           <td class="cell-muted">${escapeHtml(x.concepto)||'—'}</td>
           <td class="num">${montoCompraHtml(x)}</td>
           <td>${estadoComprobanteBadge('compra', x, badgeAntiguedad)}</td>
@@ -4802,6 +4853,57 @@ function fichaVentasHtml(clienteId){
         </tr>${pagosExpandedRowHtml('venta', x.id, 7)}`;
       }).join('')}</tbody>
     </table></div>`;
+}
+
+// Badge de alerta de giro de negocio para el staff (ficha del cliente y vista
+// previa de SIRE-RCE): motivo al pasar el cursor (title) y al hacer clic. No se
+// muestra en "Mis Comprobantes" del cliente — ya vio el aviso al subir.
+function badgeAlertaGiroHtml(c){
+  if(!c || !c.alertaGiroNegocio) return '';
+  const motivo = c.alertaGiroNegocioMotivo || 'Posible gasto no vinculado al giro del negocio.';
+  return `<div><button type="button" class="badge" style="cursor:pointer; border:1px solid #fcd34d; background:var(--warning-bg); color:#b45309; font-weight:700;" title="${escapeHtml(motivo)}" onclick="mostrarMotivoAlertaGiro('${c.id}')">⚠ Giro</button></div>`;
+}
+function mostrarMotivoAlertaGiro(id){
+  const c = state.comprobantesCompra.find(x=>x.id===id);
+  if(!c) return;
+  const cliente = state.clientes.find(x=>x.id===c.clienteId);
+  const body = `
+    <div class="alert-banner warning">
+      <span class="ico">⚠️</span>
+      <div>
+        ${escapeHtml(c.alertaGiroNegocioMotivo || 'Posible gasto no vinculado al giro del negocio.')}
+        <div class="sub">Es solo un aviso de la IA — puede ser un falso positivo. Si el gasto tiene sustento empresarial, guarda la evidencia; si no, podría ser no deducible ante SUNAT.</div>
+      </div>
+    </div>
+    <div class="ficha-grid">
+      <div class="ficha-item"><b>Proveedor</b><span>${escapeHtml(c.razonSocialProveedor)||'—'}</span></div>
+      <div class="ficha-item"><b>Concepto</b><span>${escapeHtml(c.concepto)||'—'}</span></div>
+      <div class="ficha-item" style="grid-column:1/-1;"><b>Giro declarado del cliente</b><span>${escapeHtml(cliente?.objetoSocial)||'—'}</span></div>
+    </div>`;
+  const foot = `
+    <button class="btn btn-outline" onclick="closeModal()">Cerrar</button>
+    <button class="btn btn-primary" id="btnDescartarAlertaGiro" onclick="descartarAlertaGiro('${c.id}')">Descartar alerta</button>
+  `;
+  openModal('Posible gasto no vinculado al giro', body, foot);
+}
+// Marca la alerta como revisada: baja el flag pero conserva el motivo como
+// historial (una nueva lectura con IA lo reemplaza, ver guardarComprobanteCompra).
+async function descartarAlertaGiro(id){
+  const btn = document.getElementById('btnDescartarAlertaGiro');
+  if(btn) btn.disabled = true;
+  try{
+    const {data, error} = await sb.from('comprobantes_compra').update({alerta_giro_negocio:false}).eq('id', id).select().single();
+    if(error) throw error;
+    const idx = state.comprobantesCompra.findIndex(x=>x.id===id);
+    if(idx>=0) state.comprobantesCompra[idx] = mapComprobanteCompraFromDb(data);
+    closeModal();
+    renderAll();
+    refrescarFichaClientePaneles();
+    showToast('Alerta descartada');
+  }catch(err){
+    if(btn) btn.disabled = false;
+    showToast('Error descartando la alerta: ' + err.message, true);
+  }
 }
 
 function refrescarFichaClientePaneles(){
@@ -6655,7 +6757,7 @@ function closeModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 function openClienteModal(id){
   const editing = !!id;
   const c = editing ? state.clientes.find(x=>x.id===id) : {
-    nombre:'',ruc:'',direccion:'',regimen:'RG',honorarioMensual:0,activo:true,
+    nombre:'',ruc:'',direccion:'',objetoSocial:'',regimen:'RG',honorarioMensual:0,activo:true,
     representanteLegal:'',telefono:'',email:'',banco:'',numeroCuenta:'',cuentaDetracciones:'',notas:'',
     certificadoVencimiento:''
   };
@@ -6672,6 +6774,8 @@ function openClienteModal(id){
     </div>
     <div class="form-group"><label>Dirección</label><input type="text" id="mDireccion" value="${escapeHtml(c.direccion)}" placeholder="Ej: Av. Javier Prado Este 123, San Isidro"></div>
     <div class="form-hint">Se usa en el encabezado del Libro de Compras/Ventas — si queda vacía, esa línea se omite.</div>
+    <div class="form-group"><label>Objeto social / actividades comerciales</label><textarea id="mObjetoSocial" rows="3" placeholder="Ej: Representación artística y producción de espectáculos">${escapeHtml(c.objetoSocial)}</textarea></div>
+    <div class="form-hint">Al leer una factura de compra con IA, se usa para avisar (sin bloquear) cuando el gasto parezca no vinculado al giro del negocio. Si queda vacío, no se evalúa.</div>
     <div class="form-row">
       <div class="form-group"><label>Honorario mensual (S/)</label><input type="number" step="0.01" min="0" id="mHonorario" value="${c.honorarioMensual||0}"></div>
       <div class="form-group"><label>Estado</label>
@@ -6741,6 +6845,7 @@ async function guardarCliente(id){
     nombre,
     ruc: document.getElementById('mRuc').value.trim(),
     direccion: document.getElementById('mDireccion').value.trim() || null,
+    objeto_social: document.getElementById('mObjetoSocial').value.trim() || null,
     regimen: document.getElementById('mRegimen').value,
     honorario_mensual: parseFloat(document.getElementById('mHonorario').value)||0,
     activo: document.getElementById('mActivo').value === 'true',
@@ -6774,7 +6879,7 @@ async function guardarCliente(id){
       if(error) throw error;
       const cliente = state.clientes.find(c=>c.id===id);
       Object.assign(cliente, {
-        nombre: payload.nombre, ruc: payload.ruc, direccion: payload.direccion, regimen: payload.regimen,
+        nombre: payload.nombre, ruc: payload.ruc, direccion: payload.direccion, objetoSocial: payload.objeto_social, regimen: payload.regimen,
         honorarioMensual: payload.honorario_mensual, activo: payload.activo,
         buenContribuyente: payload.buen_contribuyente,
         representanteLegal: payload.representante_legal, telefono: payload.telefono, email: payload.email,
@@ -8384,7 +8489,7 @@ async function importarDatos(data){
           `<td>${c.fechaEmision||'<i>—</i>'}</td>`+
           `<td>${c.tipoComprobante}</td>`+
           `<td>${c.numeroComprobante||'<i>—</i>'}</td>`+
-          `<td>${escapeHtml(c.razonSocialProveedor||'')||'<i>—</i>'}</td>`+
+          `<td>${escapeHtml(c.razonSocialProveedor||'')||'<i>—</i>'}${badgeAlertaGiroHtml(c)}</td>`+
           `<td>${c.clasificacionCreditoIgv||'DG'}</td>`+
           `<td>${c.moneda}</td>`+
           `<td>${fmtMoney(c.montoTotal, c.moneda)}</td>`+
