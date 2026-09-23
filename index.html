@@ -592,6 +592,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M9 12h6M9 16h6M9 8h3"/></svg>
         Mis Impuestos
       </button>
+      <button class="nav-item" data-tab="igvrenta" data-cliente-only>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 15l3-3 2 2 3-4"/></svg>
+        IGV y Renta
+      </button>
       <button class="nav-item" data-tab="agenda" data-staff-only>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><circle cx="8" cy="14" r="1"/><circle cx="12" cy="14" r="1"/><circle cx="16" cy="14" r="1"/><circle cx="8" cy="17.5" r="1"/><circle cx="12" cy="17.5" r="1"/></svg>
         Agenda
@@ -759,6 +763,14 @@
               <tbody id="tblMisImpuestos"></tbody>
             </table>
           </div>
+        </div>
+      </section>
+
+      <!-- IGV Y RENTA (cliente) -->
+      <section id="view-igvrenta" class="view">
+        <div class="panel">
+          <div class="panel-head"><h3>IGV y Renta del período</h3></div>
+          <div id="panelMisIgvRenta"></div>
         </div>
       </section>
 
@@ -2198,6 +2210,7 @@ function escapeHtml(s){
 function mapClienteFromDb(row){
   return {
     id: row.id, nombre: row.nombre, ruc: row.ruc, direccion: row.direccion, objetoSocial: row.objeto_social, regimen: row.regimen,
+    coeficienteRenta: row.coeficiente_renta,
     honorarioMensual: row.honorario_mensual, activo: row.activo,
     representanteLegal: row.representante_legal, telefono: row.telefono, email: row.email,
     banco: row.banco, numeroCuenta: row.numero_cuenta, cuentaDetracciones: row.cuenta_detracciones,
@@ -2610,6 +2623,7 @@ function setTab(tab){
     dashboard:['Dashboard','Resumen general de tu estudio'],
     comprobantes:['Mis Comprobantes','Sube tus facturas de compra y revisa tus comprobantes de venta'],
     misimpuestos:['Mis Impuestos','Situación de tus impuestos y honorarios con el estudio (solo lectura)'],
+    igvrenta:['IGV y Renta','IGV de ventas/compras y pago a cuenta de Renta del período (solo lectura)'],
     agenda:['Agenda','Tu calendario y pendientes del día a día'],
     clientes:['Clientes','Tu cartera de clientes'],
     impuestos:['Impuestos','IGV, Renta 3ra y Renta 4ta por cliente'],
@@ -4667,6 +4681,233 @@ async function confirmarImportacionExcel(){
   }
 }
 
+/* ================= IGV Y RENTA (KPI informativo, no toca el módulo de Impuestos) =================
+   IGV de ventas/compras y pago a cuenta de Renta del período, reglas 2026:
+   - RER: 1.5% fijo de ingresos netos mensuales (pago definitivo, sin regularización anual).
+   - RMT: 1% de ingresos netos mensuales, HASTA que el acumulado real del año (enero a
+     la fecha, mes a mes, con los ingresos netos reales de cada mes) supere 300 UIT — el
+     mes en que se supera, y todos los siguientes, ya usan la regla de Régimen General.
+     No es una aproximación: el acumulado se recalcula completo cada vez que se pide un
+     período, así que "el resto del ejercicio" sale solo, sin guardar ningún estado.
+   - Régimen General (y RMT tras superar 300 UIT): el MAYOR entre clientes.coeficiente_renta
+     (de la DJ Anual anterior) o 1.5%. Sin coeficiente registrado, usa 1.5%.
+   Cualquier otro régimen (RUS, 4ta Categoría, Otro) no tiene este pago a cuenta — el KPI
+   se oculta con un motivo, sin romper.
+
+   Ingresos netos = BI Gravada + Monto Exonerado + Monto Inafecto + Valor de
+   Exportación de comprobantes_venta del período (Art. 85 LIR — el total de ingresos
+   gravables de 3ra categoría, no solo lo afecto a IGV), monto bruto ANTES de
+   detracción (la detracción es solo un mecanismo de cobro, no reduce el ingreso).
+   Exonerado/Inafecto/Valor de exportación siempre son numéricos (0 por defecto) — solo
+   BI Gravada usa "sin revisar" (null) como centinela; cuenta como 0 pero se avisa
+   aparte, para no subestimar en silencio.
+
+   IGV de compras (crédito fiscal) SOLO considera comprobantes clasificados "DG"
+   (Destinada a Gravadas) — las "DGNG" requieren un prorrateo que no se puede calcular
+   con los datos que tenemos, así que se excluyen del número pero se avisan aparte; las
+   "DNG" quedan fuera correctamente (no dan derecho a crédito fiscal, sin necesidad de aviso).
+*/
+function signoComprobanteFiscal(x){ return x.tipoComprobante==='Nota de crédito' ? -1 : 1; }
+
+function ventasDelPeriodoCliente(clienteId, periodo){
+  return state.comprobantesVenta.filter(v=>v.clienteId===clienteId && periodoDeFecha(v.fechaEmision)===periodo);
+}
+function comprasDelPeriodoCliente(clienteId, periodo){
+  return state.comprobantesCompra.filter(c=>c.clienteId===clienteId && periodoDeFecha(c.fechaEmision)===periodo);
+}
+
+// Misma fórmula que SIRE/Libros — null si BI Gravada nunca se revisó (no confundir con 0).
+function igvVentaDerivado(v){
+  if(v.biGravada===null || v.biGravada===undefined || v.biGravada==='') return null;
+  const bi = Number(v.biGravada)||0, total = Number(v.montoTotal)||0;
+  const exo = Number(v.montoExonerado)||0, ina = Number(v.montoInafecto)||0;
+  const isc = Number(v.isc)||0, icb = Number(v.icbper)||0;
+  return Math.round((total - bi - exo - ina - isc - icb)*100)/100;
+}
+
+function fmtPctFino(n){
+  if(n===null || n===undefined || isNaN(n)) return '—';
+  return (n*100).toLocaleString('es-PE', {minimumFractionDigits:2, maximumFractionDigits:2}) + '%';
+}
+
+function resumenIgvVentasPeriodo(clienteId, periodo){
+  let ingresosNetos = 0, igv = 0, sinRevisar = 0;
+  ventasDelPeriodoCliente(clienteId, periodo).forEach(v=>{
+    if(v.biGravada===null || v.biGravada===undefined || v.biGravada===''){ sinRevisar++; return; }
+    const signo = signoComprobanteFiscal(v);
+    const ingresoComprobante = Number(v.biGravada||0) + Number(v.montoExonerado||0) + Number(v.montoInafecto||0) + Number(v.valorExportacion||0);
+    ingresosNetos += signo * ingresoComprobante;
+    igv += signo * (igvVentaDerivado(v)||0);
+  });
+  return {
+    ingresosNetos: Math.round(ingresosNetos*100)/100,
+    igv: Math.round(igv*100)/100,
+    sinRevisar
+  };
+}
+
+// Crédito fiscal: solo compras DG completo. DGNG se suma aparte solo para el aviso —
+// no entra al número — y DNG queda fuera sin aviso (correcto, no da derecho a crédito).
+function resumenIgvComprasPeriodo(clienteId, periodo){
+  let igvDG = 0, igvDGNG = 0;
+  comprasDelPeriodoCliente(clienteId, periodo).forEach(c=>{
+    const igv = signoComprobanteFiscal(c) * Number(c.montoIgv||0);
+    if(c.clasificacionCreditoIgv==='DGNG') igvDGNG += igv;
+    else if(c.clasificacionCreditoIgv==='DG') igvDG += igv;
+  });
+  return { igvDG: Math.round(igvDG*100)/100, igvDGNG: Math.round(igvDGNG*100)/100 };
+}
+
+function tasaRentaGeneral(coeficiente){
+  if(coeficiente===null || coeficiente===undefined || coeficiente===''){
+    return {tasa:0.015, detalle:'sin coeficiente registrado'};
+  }
+  const c = Number(coeficiente);
+  if(c>0.015) return {tasa:c, detalle:`tu coeficiente (${fmtPctFino(c)}) supera el 1.5%`};
+  return {tasa:0.015, detalle:`tu coeficiente (${fmtPctFino(c)}) es menor al 1.5%`};
+}
+
+function calcularPagoACuentaRenta(cliente, periodo, ingresosNetosMes){
+  const regimen = cliente?.regimen;
+  if(!['RG','RMT','RER'].includes(regimen)){
+    return {aplica:false, motivo: `No aplica para este régimen${regimen?' ('+escapeHtml(regimen)+')':''}.`};
+  }
+
+  if(regimen==='RER'){
+    return {
+      aplica:true, monto: Math.round(ingresosNetosMes*0.015*100)/100,
+      tasaLabel: '1.50% (RER — pago definitivo, sin regularización anual)',
+      advertenciaAcumulado: 0
+    };
+  }
+
+  const anio = Number(periodo.slice(0,4));
+  const mes = Number(periodo.slice(5,7));
+
+  if(regimen==='RMT'){
+    const uit = mmGetUitTable()[anio];
+    if(!uit){
+      return {
+        aplica:true, monto: Math.round(ingresosNetosMes*0.01*100)/100,
+        tasaLabel: `1% (RMT — no se pudo verificar el límite de 300 UIT: falta la UIT de ${anio}, configúrala en Multas → ⚙️ Años/UIT)`,
+        advertenciaAcumulado: 0
+      };
+    }
+    const limite = 300*uit;
+    let acumulado = 0, mesCruce = null, sinRevisarAcumulado = 0;
+    for(let m=1; m<=mes; m++){
+      const r = resumenIgvVentasPeriodo(cliente.id, anio + '-' + String(m).padStart(2,'0'));
+      acumulado += r.ingresosNetos;
+      sinRevisarAcumulado += r.sinRevisar;
+      if(mesCruce===null && acumulado>limite) mesCruce = anio + '-' + String(m).padStart(2,'0');
+    }
+    acumulado = Math.round(acumulado*100)/100;
+    if(mesCruce!==null){
+      const {tasa, detalle} = tasaRentaGeneral(cliente.coeficienteRenta);
+      return {
+        aplica:true, monto: Math.round(ingresosNetosMes*tasa*100)/100,
+        tasaLabel: `${fmtPctFino(tasa)} (RMT superó 300 UIT en ${fmtPeriodo(mesCruce)} — pasa a Régimen General, ${detalle})`,
+        advertenciaAcumulado: sinRevisarAcumulado
+      };
+    }
+    return {
+      aplica:true, monto: Math.round(ingresosNetosMes*0.01*100)/100,
+      tasaLabel: `1% (RMT — acumulado ${mmFmt(acumulado)} dentro de 300 UIT = ${mmFmt(limite)})`,
+      advertenciaAcumulado: sinRevisarAcumulado
+    };
+  }
+
+  // Régimen General
+  const {tasa, detalle} = tasaRentaGeneral(cliente.coeficienteRenta);
+  return {
+    aplica:true, monto: Math.round(ingresosNetosMes*tasa*100)/100,
+    tasaLabel: `${fmtPctFino(tasa)} (Régimen General, ${detalle})`,
+    advertenciaAcumulado: 0
+  };
+}
+
+function periodoNavSoloMesHtml(navFn, periodo){
+  return `
+    <div class="ag-nav" style="margin-bottom:14px;">
+      <button onclick="${navFn}(-1)" aria-label="Mes anterior">‹</button>
+      <div class="ag-month-label" style="min-width:110px;">${fmtPeriodo(periodo)}</div>
+      <button onclick="${navFn}(1)" aria-label="Mes siguiente">›</button>
+    </div>`;
+}
+
+function barraIgvHtml(label, valor, maxAbs, color){
+  const pct = maxAbs>0 ? Math.min(100, Math.round(Math.abs(valor)/maxAbs*100)) : 0;
+  return `
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+      <div style="width:120px; font-size:12.5px; color:var(--muted); flex-shrink:0;">${label}</div>
+      <div style="flex:1; background:var(--neutral-bg); border-radius:6px; height:22px; overflow:hidden;">
+        <div style="height:100%; width:${pct}%; background:${color}; border-radius:6px;"></div>
+      </div>
+      <div style="width:130px; text-align:right; font-weight:700; font-size:13px; flex-shrink:0;">${fmtMoney(valor)}</div>
+    </div>`;
+}
+
+function igvRentaPanelHtml(clienteId, periodo, navFn){
+  const cliente = state.clientes.find(x=>x.id===clienteId);
+  if(!cliente) return '<div class="empty-state"><b>No se encontró la empresa.</b></div>';
+
+  const {ingresosNetos, igv: igvVentas, sinRevisar: sinRevisarMes} = resumenIgvVentasPeriodo(clienteId, periodo);
+  const {igvDG, igvDGNG} = resumenIgvComprasPeriodo(clienteId, periodo);
+  const resultado = Math.round((igvVentas - igvDG)*100)/100;
+  const esCredito = resultado < 0;
+  const maxAbs = Math.max(Math.abs(igvVentas), Math.abs(igvDG), Math.abs(resultado), 1);
+  const pagoRenta = calcularPagoACuentaRenta(cliente, periodo, ingresosNetos);
+
+  let avisos = '';
+  if(sinRevisarMes>0){
+    avisos += `<div class="alert-banner warning" style="margin-bottom:14px;"><span class="ico">⚠️</span><div>${sinRevisarMes} comprobante(s) de venta de este mes sin BI Gravada revisada — el IGV e ingresos netos mostrados pueden estar incompletos.<div class="sub">Complétala editando el comprobante (sección "Datos para SIRE").</div></div></div>`;
+  }
+  if((pagoRenta.advertenciaAcumulado||0) > sinRevisarMes){
+    avisos += `<div class="alert-banner warning" style="margin-bottom:14px;"><span class="ico">⚠️</span><div>También hay comprobantes sin BI Gravada revisada en meses anteriores de este año — el acumulado usado para el límite de 300 UIT (RMT) puede estar incompleto.</div></div>`;
+  }
+  if(igvDGNG !== 0){
+    avisos += `<div class="alert-banner warning" style="margin-bottom:14px;"><span class="ico">ℹ️</span><div>No incluye ${mmFmt(igvDGNG)} de compras clasificadas DGNG (destinadas a operaciones gravadas y no gravadas) — requieren prorrateo manual.</div></div>`;
+  }
+
+  const chart = `
+    <div class="card" style="margin-bottom:16px;">
+      <h2 style="margin-top:0;">IGV del período</h2>
+      ${barraIgvHtml('Ventas', igvVentas, maxAbs, 'var(--violet)')}
+      ${barraIgvHtml('Compras (DG)', igvDG, maxAbs, 'var(--teal)')}
+      ${barraIgvHtml(esCredito ? 'Crédito a favor' : 'IGV por pagar', Math.abs(resultado), maxAbs, esCredito ? 'var(--success)' : 'var(--danger)')}
+    </div>`;
+
+  const rentaCard = `
+    <div class="card">
+      <h2 style="margin-top:0;">Pago a cuenta de Renta</h2>
+      ${pagoRenta.aplica ? `
+        <div class="ficha-grid">
+          <div class="ficha-item"><b>Ingresos netos del mes</b><span>${fmtMoney(ingresosNetos)}</span></div>
+          <div class="ficha-item"><b>Pago a cuenta</b><span style="font-size:18px; font-weight:800;">${fmtMoney(pagoRenta.monto)}</span></div>
+          <div class="ficha-item" style="grid-column:1/-1;"><b>Tasa aplicada</b><span>${pagoRenta.tasaLabel}</span></div>
+        </div>
+      ` : `<div class="cell-muted">${pagoRenta.motivo}</div>`}
+    </div>`;
+
+  return periodoNavSoloMesHtml(navFn, periodo) + avisos + chart + rentaCard;
+}
+
+let misIgvRentaPeriodo = periodoActualComprobantes();
+function misIgvRentaNavPeriodo(delta){
+  misIgvRentaPeriodo = sumarMesesPeriodo(misIgvRentaPeriodo, delta);
+  renderMisIgvRenta();
+}
+function renderMisIgvRenta(){
+  const el = document.getElementById('panelMisIgvRenta');
+  if(!el) return;
+  if(state.miPerfil?.rol!=='cliente') return; // solo aplica a la vista del cliente — la de staff vive en la ficha
+  const clienteId = miClienteId();
+  el.innerHTML = clienteId ? igvRentaPanelHtml(clienteId, misIgvRentaPeriodo, 'misIgvRentaNavPeriodo') : '<div class="empty-state"><b>No se encontró tu empresa.</b></div>';
+}
+function fichaIgvRentaHtml(clienteId){
+  return igvRentaPanelHtml(clienteId, fichaClienteIgvRentaPeriodo, 'fichaClienteIgvRentaNavPeriodo');
+}
+
 let fichaClienteId = null;
 let fichaClientePeriodo = null;
 let fichaClienteTodos = false;
@@ -4677,6 +4918,7 @@ function openFichaCliente(id){
   fichaClienteId = id;
   fichaClientePeriodo = periodoActualComprobantes();
   fichaClienteTodos = false;
+  fichaClienteIgvRentaPeriodo = periodoActualComprobantes();
   fichaConciliacionBanco = null;
   fichaConciliacionMoneda = null;
 
@@ -4762,6 +5004,7 @@ function openFichaCliente(id){
   const bodyCompras = fichaComprasHtml(id);
   const bodyVentas = fichaVentasHtml(id);
   const bodyConciliacion = fichaConciliacionHtml(id);
+  const bodyIgvRenta = fichaIgvRentaHtml(id);
 
   const body = `
     <div class="ficha-tabs" id="fichaClienteTabs">
@@ -4769,11 +5012,13 @@ function openFichaCliente(id){
       <div class="ficha-tab" data-tab="compras" onclick="fichaClienteSetTab('compras')">Comprobantes de compra${comprasCliente.length?' ('+comprasCliente.length+')':''}</div>
       <div class="ficha-tab" data-tab="ventas" onclick="fichaClienteSetTab('ventas')">Comprobantes de venta${ventasCliente.length?' ('+ventasCliente.length+')':''}</div>
       <div class="ficha-tab" data-tab="conciliacion" onclick="fichaClienteSetTab('conciliacion')">Conciliación bancaria</div>
+      <div class="ficha-tab" data-tab="igvrenta" onclick="fichaClienteSetTab('igvrenta')">IGV y Renta</div>
     </div>
     <div id="fichaClientePanel-resumen">${bodyResumen}</div>
     <div id="fichaClientePanel-compras" style="display:none;">${bodyCompras}</div>
     <div id="fichaClientePanel-ventas" style="display:none;">${bodyVentas}</div>
     <div id="fichaClientePanel-conciliacion" style="display:none;">${bodyConciliacion}</div>
+    <div id="fichaClientePanel-igvrenta" style="display:none;">${bodyIgvRenta}</div>
   `;
   const foot = `
     <button class="btn btn-outline" onclick="closeModal()">Cerrar</button>
@@ -4910,9 +5155,17 @@ function refrescarFichaClientePaneles(){
   const elC = document.getElementById('fichaClientePanel-compras');
   const elV = document.getElementById('fichaClientePanel-ventas');
   const elK = document.getElementById('fichaClientePanel-conciliacion');
+  const elG = document.getElementById('fichaClientePanel-igvrenta');
   if(elC) elC.innerHTML = fichaComprasHtml(fichaClienteId);
   if(elV) elV.innerHTML = fichaVentasHtml(fichaClienteId);
   if(elK) elK.innerHTML = fichaConciliacionHtml(fichaClienteId);
+  if(elG) elG.innerHTML = fichaIgvRentaHtml(fichaClienteId);
+}
+let fichaClienteIgvRentaPeriodo = null;
+function fichaClienteIgvRentaNavPeriodo(delta){
+  fichaClienteIgvRentaPeriodo = sumarMesesPeriodo(fichaClienteIgvRentaPeriodo, delta);
+  const el = document.getElementById('fichaClientePanel-igvrenta');
+  if(el) el.innerHTML = fichaIgvRentaHtml(fichaClienteId);
 }
 function fichaClienteNavPeriodo(delta){
   if(fichaClienteTodos) return;
@@ -4939,7 +5192,7 @@ async function fichaClienteExportarZip(){
 
 function fichaClienteSetTab(tab){
   document.querySelectorAll('#fichaClienteTabs .ficha-tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===tab));
-  ['resumen','compras','ventas','conciliacion'].forEach(t=>{
+  ['resumen','compras','ventas','conciliacion','igvrenta'].forEach(t=>{
     const el = document.getElementById('fichaClientePanel-'+t);
     if(el) el.style.display = (t===tab) ? '' : 'none';
   });
@@ -6686,6 +6939,7 @@ function renderAll(){
   renderDashboard();
   renderComprobantes();
   renderMisImpuestos();
+  renderMisIgvRenta();
   renderVentas();
   renderAgenda();
   renderClientes();
@@ -6772,6 +7026,8 @@ function openClienteModal(id){
         </select>
       </div>
     </div>
+    <div class="form-group"><label>Coeficiente de Renta <span class="cell-muted" style="font-weight:400; text-transform:none;">(de la DJ Anual anterior)</span></label><input type="number" step="0.0001" id="mCoeficienteRenta" value="${c.coeficienteRenta ?? ''}" placeholder="Ej: 0.0125"></div>
+    <div class="form-hint">Solo aplica a Régimen General, o RMT si ya superó las 300 UIT del año — se usa en el KPI de "IGV y Renta" para el pago a cuenta (el mayor entre este coeficiente y 1.5%). Vacío = usa 1.5%.</div>
     <div class="form-group"><label>Dirección</label><input type="text" id="mDireccion" value="${escapeHtml(c.direccion)}" placeholder="Ej: Av. Javier Prado Este 123, San Isidro"></div>
     <div class="form-hint">Se usa en el encabezado del Libro de Compras/Ventas — si queda vacía, esa línea se omite.</div>
     <div class="form-group"><label>Objeto social / actividades comerciales</label><textarea id="mObjetoSocial" rows="3" placeholder="Ej: Representación artística y producción de espectáculos">${escapeHtml(c.objetoSocial)}</textarea></div>
@@ -6846,6 +7102,7 @@ async function guardarCliente(id){
     ruc: document.getElementById('mRuc').value.trim(),
     direccion: document.getElementById('mDireccion').value.trim() || null,
     objeto_social: document.getElementById('mObjetoSocial').value.trim() || null,
+    coeficiente_renta: document.getElementById('mCoeficienteRenta').value ? Number(document.getElementById('mCoeficienteRenta').value) : null,
     regimen: document.getElementById('mRegimen').value,
     honorario_mensual: parseFloat(document.getElementById('mHonorario').value)||0,
     activo: document.getElementById('mActivo').value === 'true',
@@ -6879,7 +7136,7 @@ async function guardarCliente(id){
       if(error) throw error;
       const cliente = state.clientes.find(c=>c.id===id);
       Object.assign(cliente, {
-        nombre: payload.nombre, ruc: payload.ruc, direccion: payload.direccion, objetoSocial: payload.objeto_social, regimen: payload.regimen,
+        nombre: payload.nombre, ruc: payload.ruc, direccion: payload.direccion, objetoSocial: payload.objeto_social, coeficienteRenta: payload.coeficiente_renta, regimen: payload.regimen,
         honorarioMensual: payload.honorario_mensual, activo: payload.activo,
         buenContribuyente: payload.buen_contribuyente,
         representanteLegal: payload.representante_legal, telefono: payload.telefono, email: payload.email,
